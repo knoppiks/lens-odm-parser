@@ -1,4 +1,4 @@
-(defproject lens-odm-parser "0.1.0-SNAPSHOT"
+(defproject lens-odm-parser "0.1-SNAPSHOT"
   :description "Parses ODM XML files into a Clojure data structure."
   :url "http://example.com/FIXME"
   :license {:name "Eclipse Public License"
@@ -9,4 +9,9 @@
                  [org.clojure/data.zip "0.1.1"]
                  [clj-time "0.11.0"]
                  [prismatic/plumbing "0.5.2"]
-                 [prismatic/schema "1.0.4"]])
+                 [prismatic/schema "1.0.4"]]
+
+  :profiles {:dev
+             {:source-paths ["dev"]
+              :dependencies [[org.clojure/test.check "0.9.0"]]
+              :global-vars {*print-length* 20}}})
