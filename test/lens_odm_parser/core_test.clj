@@ -4,11 +4,15 @@
             [clojure.data.zip.xml :refer [xml1->]]
             [clojure.test :refer :all]
             [clojure.test.check.clojure-test :refer [defspec]]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
             [clojure.zip :as zip]
             [lens-odm-parser.core :refer :all]
             [schema.core :as s]
             [schema.test :refer [validate-schemas]]
-            [schema.utils :as su]))
+            [schema.experimental.generators :as g]
+            [schema.utils :as su])
+  (:import [org.joda.time DateTime]))
 
 (use-fixtures :once validate-schemas)
 
@@ -30,8 +34,6 @@
       "Update" :update
       "Remove" :remove
       "Context" :context))
-  (testing "takes trasnaction type from parent"
-    (is (= :insert (tx-type (xml1-> (zipper [:Foo {:TransactionType "Insert"} [:Bar]]) :Bar)))))
   (testing "invalid transaction type"
     (is (thrown? Exception (tx-type (zipper [:Foo {:TransactionType "Foo"}]))))))
 
@@ -80,21 +82,21 @@
     {"IG1"
      {:tx-type :insert
       :items
-      {"I1" {:tx-type :insert :data-type :string :value "1"}}}}
+      {"I1" {:data-type :string :value "1"}}}}
 
     [:ItemGroupData {:ItemGroupOID "IG1" :TransactionType "Insert"}
      [:ItemDataInteger {:ItemOID "I1"} "1"]]
     {"IG1"
      {:tx-type :insert
       :items
-      {"I1" {:tx-type :insert :data-type :integer :value 1}}}}
+      {"I1" {:data-type :integer :value 1}}}}
 
     [:ItemGroupData {:ItemGroupOID "IG1" :TransactionType "Insert"}
      [:ItemDataFloat {:ItemOID "I1"} "1.1"]]
     {"IG1"
      {:tx-type :insert
       :items
-      {"I1" {:tx-type :insert :data-type :float :value 1.1}}}}
+      {"I1" {:data-type :float :value 1.1}}}}
 
     [:ItemGroupData {:ItemGroupOID "IG1" :TransactionType "Insert"}
      [:ItemDataString {:ItemOID "I1"} "1"]
@@ -102,8 +104,8 @@
     {"IG1"
      {:tx-type :insert
       :items
-      {"I1" {:tx-type :insert :data-type :string :value "1"}
-       "I2" {:tx-type :insert :data-type :integer :value 1}}}}))
+      {"I1" {:data-type :string :value "1"}
+       "I2" {:data-type :integer :value 1}}}}))
 
 (deftest parse-form-test
   (are [sexp form-data] (= form-data (parse-form nil (zipper sexp)))
@@ -176,3 +178,9 @@
      :file-oid "F1"
      :creation-date-time (date-time 2016 3 18 14 41)
      :clinical-data {"S1" {}}}))
+
+(def date-time-generator (gen/return (date-time 2016 3 18 14 41)))
+
+(defspec parse-unparse-check 15
+  (prop/for-all [file (g/generator ODMFile {DateTime date-time-generator})]
+    (= file (parse-odm-file (zipper (unparse-odm-file file))))))

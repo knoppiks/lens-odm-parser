@@ -1,12 +1,14 @@
 (ns lens-odm-parser.core
-  (:use plumbing.core)
+  "The two main functions are parse-odm-file and unparse-odm-file."
   (:require [clj-time.core :refer [now]]
             [clj-time.format :as tf]
+            [clojure.data.zip :as dz]
             [clojure.data.zip.xml :as xml :refer [xml-> xml1-> attr text]]
             [clojure.string :as str]
             [clojure.zip :as zip]
+            [plumbing.core :refer [assoc-when]]
             [schema.coerce :as c]
-            [schema.core :as s :refer [Str Int Num]]
+            [schema.core :as s :refer [Str]]
             [schema.utils :as su])
   (:import [org.joda.time DateTime]))
 
@@ -14,7 +16,7 @@
 
 (def Element
   "An XML element."
-  (s/pred zip/branch?))
+  (s/pred zip/branch? 'element?))
 
 (def NonBlankStr
   (s/constrained Str (complement str/blank?) 'non-blank?))
@@ -34,50 +36,67 @@
 (def DataType
   (s/enum :string :integer :float :date-time))
 
-(def Value
-  (s/cond-pre Str Num DateTime))
+(s/defn item [data-type :- DataType value-schema]
+  {(s/optional-key :tx-type) TxType
+   :data-type (s/eq data-type)
+   :value value-schema})
+
+(def StringItem
+  (item :string Str))
+
+(def IntegerItem
+  (item :integer Long))
+
+(def FloatItem
+  (item :float (s/constrained Double #(Double/isFinite %) 'finite?)))
+
+(def DateTimeItem
+  (item :date-time DateTime))
 
 (def Item
-  {(s/optional-key :tx-type) TxType
-   :data-type DataType
-   :value Value})
+  (s/conditional
+    #(= :string (:data-type %)) StringItem
+    #(= :integer (:data-type %)) IntegerItem
+    #(= :float (:data-type %)) FloatItem
+    #(= :date-time (:data-type %)) DateTimeItem
+    'item?))
 
 (def ItemData
-  {(s/named OID "item-oid") Item})
+  (s/constrained {(s/named OID "item-oid") Item} seq 'non-empty?))
 
 (def ItemGroup
   {(s/optional-key :tx-type) TxType
    (s/optional-key :items) ItemData})
 
 (def ItemGroupData
-  {(s/named OID "item-group-oid") ItemGroup})
+  (s/constrained {(s/named OID "item-group-oid") ItemGroup} seq 'non-empty?))
 
 (def Form
   {(s/optional-key :tx-type) TxType
    (s/optional-key :item-groups) ItemGroupData})
 
 (def FormData
-  {(s/named OID "form-oid") Form})
+  (s/constrained {(s/named OID "form-oid") Form} seq 'non-empty?))
 
 (def StudyEvent
   {(s/optional-key :tx-type) TxType
    (s/optional-key :forms) FormData})
 
 (def StudyEventData
-  {(s/named OID "study-event-oid") StudyEvent})
+  (s/constrained {(s/named OID "study-event-oid") StudyEvent} seq 'non-empty?))
 
 (def Subject
   {(s/optional-key :tx-type) TxType
    (s/optional-key :study-events) StudyEventData})
 
 (def SubjectData
-  {SubjectKey Subject})
+  (s/constrained {SubjectKey Subject} seq 'non-empty?))
 
 (def ClinicalDatum
   {(s/optional-key :subjects) SubjectData})
 
 (def ClinicalData
-  {(s/named OID "study-oid") ClinicalDatum})
+  (s/constrained {(s/named OID "study-oid") ClinicalDatum} seq 'non-empty?))
 
 (def FileType
   (s/enum :snapshot :transactional))
@@ -123,8 +142,11 @@
   (->> (xml1-> loc (attr :SubjectKey))
        (validate subject-key-checker loc)))
 
+(defn text-with-whitespace [loc]
+  (apply str (xml-> loc dz/descendants zip/node string?)))
+
 (defn string-data [loc]
-  (xml1-> loc text))
+  (xml1-> loc text-with-whitespace))
 
 (def integer-coercer
   (c/coercer Long {Long (c/safe #(Long/parseLong %))}))
@@ -156,17 +178,11 @@
 (def transaction-type-checker (s/checker TransactionType))
 
 (s/defn tx-type :- (s/maybe TxType)
-  "Tries to determine the transaction type of a loc.
-
-  Does so recursive to parents. Returns nil if none was found. Throws a
-  validation error on invalid transaction type."
   [loc :- Element]
-  (if-let [t (xml1-> loc (attr :TransactionType))]
-    (-> (validate transaction-type-checker loc t)
-        (str/lower-case)
-        (keyword))
-    (when-let [parent (zip/up loc)]
-      (tx-type parent))))
+  (some->> (xml1-> loc (attr :TransactionType))
+           (validate transaction-type-checker loc)
+           (str/lower-case)
+           (keyword)))
 
 (s/defn parse-string-item :- ItemData
   [r :- (s/maybe ItemData) item-data :- Element]
@@ -270,3 +286,94 @@
        :file-oid (oid odm-file :FileOID)
        :creation-date-time (creation-date-time odm-file)}
       (assoc-when :clinical-data (parse-clinical-data odm-file))))
+
+;; ---- Unparsing -------------------------------------------------------------
+
+(defn unparse-date-time [date-time]
+  (tf/unparse (tf/formatters :date-time) date-time))
+
+(defn assoc-tx-type [m tx-type]
+  (assoc-when m :TransactionType (some-> tx-type name str/capitalize)))
+
+(defn item-attrs [oid {:keys [tx-type]}]
+  (-> {:ItemOID oid}
+      (assoc-tx-type tx-type)))
+
+(defmulti unparse-item* (fn [_ {:keys [data-type]}] data-type))
+
+(defmethod unparse-item* :string
+  [oid {:keys [value] :as item}]
+  [:ItemDataString (item-attrs oid item) value])
+
+(defmethod unparse-item* :integer
+  [oid {:keys [value] :as item}]
+  [:ItemDataInteger (item-attrs oid item) value])
+
+(defmethod unparse-item* :float
+  [oid {:keys [value] :as item}]
+  [:ItemDataFloat (item-attrs oid item) value])
+
+(defmethod unparse-item* :date-time
+  [oid {:keys [value] :as item}]
+  [:ItemDataDatetime (item-attrs oid item) (unparse-date-time value)])
+
+(s/defn unparse-item [oid :- OID item :- Item]
+  (unparse-item* oid item))
+
+(defn item-group-attrs [oid {:keys [tx-type]}]
+  (-> {:ItemGroupOID oid}
+      (assoc-tx-type tx-type)))
+
+(s/defn unparse-item-group
+  [oid :- OID {:keys [items] :as item-group} :- ItemGroup]
+  [:ItemGroupData
+   (item-group-attrs oid item-group)
+   (for [[oid item] items]
+     (unparse-item oid item))])
+
+(defn form-attrs [oid {:keys [tx-type]}]
+  (-> {:FormOID oid}
+      (assoc-tx-type tx-type)))
+
+(s/defn unparse-form
+  [oid :- OID {:keys [item-groups] :as form} :- Form]
+  [:FormData
+   (form-attrs oid form)
+   (for [[oid item-group] item-groups]
+     (unparse-item-group oid item-group))])
+
+(defn study-event-attrs [oid {:keys [tx-type]}]
+  (-> {:StudyEventOID oid}
+      (assoc-tx-type tx-type)))
+
+(s/defn unparse-study-event
+  [oid :- OID {:keys [forms] :as study-event} :- StudyEvent]
+  [:StudyEventData
+   (study-event-attrs oid study-event)
+   (for [[oid form] forms]
+     (unparse-form oid form))])
+
+(defn subject-attrs [key {:keys [tx-type]}]
+  (-> {:SubjectKey key}
+      (assoc-tx-type tx-type)))
+
+(s/defn unparse-subject
+  [key :- SubjectKey {:keys [study-events] :as subject} :- Subject]
+  [:SubjectData
+   (subject-attrs key subject)
+   (for [[oid study-event] study-events]
+     (unparse-study-event oid study-event))])
+
+(s/defn unparse-clinical-datum
+  [study-oid :- OID {:keys [subjects]} :- ClinicalDatum]
+  [:ClinicalData {:StudyOID study-oid}
+   (for [[key subject] subjects]
+     (unparse-subject key subject))])
+
+(s/defn unparse-odm-file [odm-file :- ODMFile]
+  [:ODM
+   {:FileType (str/capitalize (name (:file-type odm-file)))
+    :FileOID (:file-oid odm-file)
+    :CreationDateTime (unparse-date-time (:creation-date-time odm-file))}
+   (for [[study-oid clinical-datum] (:clinical-data odm-file)]
+     (unparse-clinical-datum study-oid clinical-datum))])
