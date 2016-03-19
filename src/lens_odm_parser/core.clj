@@ -3,20 +3,24 @@
   (:use plumbing.core)
   (:require [clj-time.core :refer [now]]
             [clj-time.format :as tf]
-            [clojure.data.zip :as dz]
-            [clojure.data.zip.xml :as xml :refer [xml-> xml1-> attr text]]
             [clojure.string :as str]
-            [clojure.zip :as zip]
             [schema.coerce :as c]
             [schema.core :as s :refer [Str Keyword]]
             [schema.utils :as su])
   (:import [org.joda.time DateTime]))
 
+(defmacro for-map*
+  "Like for-map but returns nil instead of empty maps."
+  [[sym coll] key-expr val-expr]
+  `(reduce (fn [r# ~sym] (assoc r# ~key-expr ~val-expr)) nil ~coll))
+
 ;; ---- Schemas ---------------------------------------------------------------
 
 (def Element
   "An XML element."
-  (s/pred zip/branch? 'element?))
+  {:tag Keyword
+   :attrs {Keyword Str}
+   :content [(s/cond-pre (s/recursive #'Element) Str)]})
 
 (def NonBlankStr
   (s/constrained Str (complement str/blank?) 'non-blank?))
@@ -62,41 +66,41 @@
     'item?))
 
 (def ItemData
-  {(s/named OID "item-oid") Item})
+  (s/constrained {(s/named OID "item-oid") Item} seq 'non-empty?))
 
 (def ItemGroup
   {(s/optional-key :tx-type) TxType
-   :items ItemData})
+   (s/optional-key :items) ItemData})
 
 (def ItemGroupData
-  {(s/named OID "item-group-oid") ItemGroup})
+  (s/constrained {(s/named OID "item-group-oid") ItemGroup} seq 'non-empty?))
 
 (def Form
   {(s/optional-key :tx-type) TxType
-   :item-groups ItemGroupData})
+   (s/optional-key :item-groups) ItemGroupData})
 
 (def FormData
-  {(s/named OID "form-oid") Form})
+  (s/constrained {(s/named OID "form-oid") Form} seq 'non-empty?))
 
 (def StudyEvent
   {(s/optional-key :tx-type) TxType
-   :forms FormData})
+   (s/optional-key :forms) FormData})
 
 (def StudyEventData
-  {(s/named OID "study-event-oid") StudyEvent})
+  (s/constrained {(s/named OID "study-event-oid") StudyEvent} seq 'non-empty?))
 
 (def Subject
   {(s/optional-key :tx-type) TxType
-   :study-events StudyEventData})
+   (s/optional-key :study-events) StudyEventData})
 
 (def SubjectData
-  {SubjectKey Subject})
+  (s/constrained {SubjectKey Subject} seq 'non-empty?))
 
 (def ClinicalDatum
-  {:subjects SubjectData})
+  {(s/optional-key :subjects) SubjectData})
 
 (def ClinicalData
-  {(s/named OID "study-oid") ClinicalDatum})
+  (s/constrained {(s/named OID "study-oid") ClinicalDatum} seq 'non-empty?))
 
 (def FileType
   (s/enum :snapshot :transactional))
@@ -105,7 +109,7 @@
   {:file-type FileType
    :file-oid OID
    :creation-date-time DateTime
-   :clinical-data ClinicalData})
+   (s/optional-key :clinical-data) ClinicalData})
 
 (def SnapshotODMFile
   (s/constrained ODMFile #(#{:snapshot} (:file-type %)) 'snapshot?))
@@ -115,51 +119,50 @@
 
 ;; ---- Parsing ---------------------------------------------------------------
 
-(defn- validation-ex [loc value error]
+(defn- validation-ex [e value error]
   (ex-info (format "Invalid value %s: %s" value (pr-str error))
-           {:type ::validation-error :loc loc :value value :error error}))
+           {:type ::validation-error :element e :value value :error error}))
 
-(defn- validate [checker loc v]
+(defn- validate [checker e v]
   (if-let [error (checker v)]
-    (throw (validation-ex loc v error))
+    (throw (validation-ex e v error))
     v))
 
-(defn- coerce [coercer loc s]
+(defn- coerce [coercer e s]
   (let [v (coercer s)]
     (if-let [error (su/error-val v)]
-      (throw (validation-ex loc s error))
+      (throw (validation-ex e s error))
       v)))
 
 (def oid-checker (s/checker OID))
 
 (s/defn oid [e :- Element attr :- Keyword]
-  (->> (xml1-> e (xml/attr attr))
+  (->> (-> e :attrs attr)
        (validate oid-checker e)))
 
 (def subject-key-checker (s/checker SubjectKey))
 
 (s/defn subject-key [e :- Element]
-  (->> (xml1-> e (attr :SubjectKey))
+  (->> (-> e :attrs :SubjectKey)
        (validate subject-key-checker e)))
 
-(defn text-with-whitespace [e]
-  (apply str (xml-> e dz/descendants zip/node string?)))
-
 (defn string-value [e]
-  (xml1-> e text-with-whitespace))
+  (apply str (:content e)))
 
 (def integer-coercer
   (c/coercer Long {Long (c/safe #(Long/parseLong %))}))
 
 (defn integer-value [e]
-  (->> (xml1-> e text)
+  (->> (string-value e)
+       (str/trim)
        (coerce integer-coercer e)))
 
 (def float-coercer
   (c/coercer Double {Double (c/safe #(Double/parseDouble %))}))
 
 (defn float-value [e]
-  (->> (xml1-> e text)
+  (->> (string-value e)
+       (str/trim)
        (coerce float-coercer e)))
 
 (defn parse-date-time [s]
@@ -172,14 +175,15 @@
   (c/coercer DateTime {DateTime (c/safe parse-date-time)}))
 
 (defn date-time-value [e]
-  (->> (xml1-> e text)
+  (->> (string-value e)
+       (str/trim)
        (coerce date-time-coercer e)))
 
 (def transaction-type-checker (s/checker TransactionType))
 
 (s/defn tx-type :- (s/maybe TxType)
   [e :- Element]
-  (some->> (xml1-> e (attr :TransactionType))
+  (some->> (-> e :attrs :TransactionType)
            (validate transaction-type-checker e)
            (str/lower-case)
            (keyword)))
@@ -189,14 +193,22 @@
     {:tx-type tx-type}
     {}))
 
-(s/defn parse-items* :- ItemData
-  [item-group-data :- Element tag data-type :- DataType value-fn]
-  (for-map [item-data (xml-> item-group-data tag)]
-    (oid item-data :ItemOID)
-    (-> (data item-data)
-        (assoc :data-type data-type :value (value-fn item-data)))))
+(s/defn parse-item [data-type :- DataType value-fn e :- Element]
+  (assoc (data e) :data-type data-type :value (value-fn e)))
 
-(s/defn parse-items :- ItemData
+(defn tag= [tag]
+  (filter #(= tag (:tag %))))
+
+(s/defn elements [tag :- Keyword e :- Element]
+  (eduction (tag= tag) (:content e)))
+
+(s/defn parse-items* :- (s/maybe ItemData)
+  [item-group-data :- Element tag data-type :- DataType value-fn]
+  (for-map* [item-data (elements tag item-group-data)]
+    (oid item-data :ItemOID)
+    (parse-item data-type value-fn item-data)))
+
+(s/defn parse-items :- (s/maybe ItemData)
   [item-group-data :- Element]
   (merge
     (parse-items* item-group-data :ItemDataString :string string-value)
@@ -206,65 +218,74 @@
 
 (s/defn parse-item-group :- ItemGroup [item-group-data :- Element]
   (-> (data item-group-data)
-      (assoc :items (parse-items item-group-data))))
+      (assoc-when :items (parse-items item-group-data))))
 
-(s/defn parse-item-groups :- ItemGroupData [form-data :- Element]
-  (for-map [item-group-data (xml-> form-data :ItemGroupData)]
+(s/defn parse-item-groups :- (s/maybe ItemGroupData)
+  [form-data :- Element]
+  (for-map* [item-group-data (elements :ItemGroupData form-data)]
     (oid item-group-data :ItemGroupOID)
     (parse-item-group item-group-data)))
 
 (s/defn parse-form :- Form [form-data :- Element]
   (-> (data form-data)
-      (assoc :item-groups (parse-item-groups form-data))))
+      (assoc-when :item-groups (parse-item-groups form-data))))
 
-(s/defn parse-forms :- FormData [study-event-data :- Element]
-  (for-map [form-data (xml-> study-event-data :FormData)]
+(s/defn parse-forms :- (s/maybe FormData)
+  [study-event-data :- Element]
+  (for-map* [form-data (elements :FormData study-event-data)]
     (oid form-data :FormOID)
     (parse-form form-data)))
 
 (s/defn parse-study-event :- StudyEvent [study-event-data :- Element]
   (-> (data study-event-data)
-      (assoc :forms (parse-forms study-event-data))))
+      (assoc-when :forms (parse-forms study-event-data))))
 
-(s/defn parse-study-events :- StudyEventData [subject-data :- Element]
-  (for-map [study-event-data (xml-> subject-data :StudyEventData)]
+(s/defn parse-study-events :- (s/maybe StudyEventData)
+  [subject-data :- Element]
+  (for-map* [study-event-data (elements :StudyEventData subject-data)]
     (oid study-event-data :StudyEventOID)
     (parse-study-event study-event-data)))
 
 (s/defn parse-subject :- Subject [subject-data :- Element]
   (-> (data subject-data)
-      (assoc :study-events (parse-study-events subject-data))))
+      (assoc-when :study-events (parse-study-events subject-data))))
 
-(s/defn parse-subjects :- SubjectData [clinical-data :- Element]
-  (for-map [subject-data (xml-> clinical-data :SubjectData)]
+(s/defn parse-subjects :- (s/maybe SubjectData)
+  [clinical-data :- Element]
+  (for-map* [subject-data (elements :SubjectData clinical-data)]
     (subject-key subject-data)
     (parse-subject subject-data)))
 
 (s/defn parse-clinical-datum :- ClinicalDatum [clinical-data :- Element]
-  {:subjects (parse-subjects clinical-data)})
+  (assoc-when {} :subjects (parse-subjects clinical-data)))
 
-(s/defn parse-clinical-data :- ClinicalData [odm-file :- Element]
-  (for-map [clinical-data (xml-> odm-file :ClinicalData)]
+(s/defn parse-clinical-data :- (s/maybe ClinicalData)
+  [odm-file :- Element]
+  (for-map* [clinical-data (elements :ClinicalData odm-file)]
     (oid clinical-data :StudyOID)
     (parse-clinical-datum clinical-data)))
 
 (def file-type-coercer
   (c/coercer FileType {FileType (c/safe #(-> % str/lower-case keyword))}))
 
-(defn file-type [loc]
-  (->> (xml1-> loc (attr :FileType))
-       (coerce file-type-coercer loc)))
+(s/defn file-type [e :- Element]
+  (->> (-> e :attrs :FileType)
+       (coerce file-type-coercer e)))
 
-(defn creation-date-time [loc]
-  (->> (xml1-> loc (attr :CreationDateTime))
-       (coerce date-time-coercer loc)))
+(s/defn creation-date-time [e :- Element]
+  (->> (-> e :attrs :CreationDateTime)
+       (coerce date-time-coercer e)))
 
 (s/defn parse-odm-file :- ODMFile
+  "Parses a ODM file from its root element.
+
+  Throws an exception with :type ::validation-error and other keys like
+  :element :value and :error in ex-data."
   [odm-file :- Element]
-  {:file-type (file-type odm-file)
-   :file-oid (oid odm-file :FileOID)
-   :creation-date-time (creation-date-time odm-file)
-   :clinical-data (parse-clinical-data odm-file)})
+  (-> {:file-type (file-type odm-file)
+       :file-oid (oid odm-file :FileOID)
+       :creation-date-time (creation-date-time odm-file)}
+      (assoc-when :clinical-data (parse-clinical-data odm-file))))
 
 ;; ---- Unparsing -------------------------------------------------------------
 
