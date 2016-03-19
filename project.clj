@@ -13,5 +13,6 @@
 
   :profiles {:dev
              {:source-paths ["dev"]
-              :dependencies [[org.clojure/test.check "0.9.0"]]
+              :dependencies [[org.clojure/test.check "0.9.0"]
+                             [criterium "0.4.4"]]
               :global-vars {*print-length* 20}}})

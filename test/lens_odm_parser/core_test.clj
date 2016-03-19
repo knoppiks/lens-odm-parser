@@ -17,11 +17,11 @@
 (use-fixtures :once validate-schemas)
 
 (deftest SnapshotODMFile-test
-  (is (nil? (s/check SnapshotODMFile {:file-type :snapshot :file-oid "F1" :creation-date-time (now)})))
+  (is (nil? (s/check SnapshotODMFile {:file-type :snapshot :file-oid "F1" :creation-date-time (now) :clinical-data {}})))
   (is (some? (s/check SnapshotODMFile {:file-type :transactional :file-oid "F1"}))))
 
 (deftest TransactionalODMFile-test
-  (is (nil? (s/check TransactionalODMFile {:file-type :transactional :file-oid "F1" :creation-date-time (now)})))
+  (is (nil? (s/check TransactionalODMFile {:file-type :transactional :file-oid "F1" :creation-date-time (now) :clinical-data {}})))
   (is (some? (s/check TransactionalODMFile {:file-type :snapshot :file-oid "F1"}))))
 
 (defn- zipper [sexp]
@@ -38,121 +38,111 @@
     (is (thrown? Exception (tx-type (zipper [:Foo {:TransactionType "Foo"}]))))))
 
 (deftest parse-string-item-test
-  (are [sexp item] (= item (parse-string-item nil (zipper sexp)))
-    [:ItemDataString {:ItemOID "I1" :TransactionType "Insert"} "1"]
-    {"I1" {:tx-type :insert :data-type :string :value "1"}}))
+  (are [s v] (= v (string-value (zipper [:X s])))
+    "1" "1"
+    "a" "a"
+    " " " "
+    "  " "  "
+    " x " " x "))
 
 (deftest parse-integer-item-test
-  (are [sexp item] (= item (parse-integer-item nil (zipper sexp)))
-    [:ItemDataInteger {:ItemOID "I1" :TransactionType "Insert"} "1"]
-    {"I1" {:tx-type :insert :data-type :integer :value 1}})
-  (let [sexp [:ItemDataInteger {:ItemOID "I1" :TransactionType "Insert"} "a"]]
-    (is (thrown? Exception (parse-integer-item nil (zipper sexp))))))
+  (are [s v] (= v (integer-value (zipper [:X s])))
+    "1" 1)
+  (is (thrown? Exception (integer-value (zipper [:X "a"]))))
+  (is (thrown? Exception (integer-value (zipper [:X "1.1"])))))
 
 (deftest parse-float-item-test
-  (are [sexp item] (= item (parse-float-item nil (zipper sexp)))
-    [:ItemDataFloat {:ItemOID "I1" :TransactionType "Insert"} "1.1"]
-    {"I1" {:tx-type :insert :data-type :float :value 1.1}})
-  (let [sexp [:ItemDataFloat {:ItemOID "I1" :TransactionType "Insert"} "1"]]
-    (is (float? (:value ((parse-float-item nil (zipper sexp)) "I1")))))
-  (let [sexp [:ItemDataFloat {:ItemOID "I1" :TransactionType "Insert"} "a"]]
-    (is (thrown? Exception (parse-float-item nil (zipper sexp))))))
+  (are [s v] (= v (float-value (zipper [:X s])))
+    "1.1" 1.1
+    "1" 1.0)
+  (is (thrown? Exception (float-value (zipper [:X "a"])))))
 
-(deftest parse-date-time-item-test
-  (testing "UTC no millis"
-    (are [sexp item] (= item (parse-date-time-item nil (zipper sexp)))
-      [:ItemDataDatetime {:ItemOID "I1"} "2016-03-18T14:41:00Z"]
-      {"I1" {:data-type :date-time :value (date-time 2016 3 18 14 41)}}))
-  (testing "UTC with millis"
-    (are [sexp item] (= item (parse-date-time-item nil (zipper sexp)))
-      [:ItemDataDatetime {:ItemOID "I1"} "2016-03-18T14:41:00.23Z"]
-      {"I1" {:data-type :date-time :value (date-time 2016 3 18 14 41 0 230)}}))
-  (testing "+01:00 with millis"
-    (are [sexp item] (= item (parse-date-time-item nil (zipper sexp)))
-      [:ItemDataDatetime {:ItemOID "I1"} "2016-03-18T14:41:00.23+01:00"]
-      {"I1" {:data-type :date-time :value (date-time 2016 3 18 13 41 0 230)}})))
+(deftest date-time-value-test
+  (are [s v] (= v (date-time-value (zipper [:X s])))
+    "2016-03-18T14:41:00Z" (date-time 2016 3 18 14 41)
+    "2016-03-18T14:41:00.23Z" (date-time 2016 3 18 14 41 0 230)
+    "2016-03-18T14:41:00.23+01:00" (date-time 2016 3 18 13 41 0 230)))
 
 (deftest parse-item-group-test
-  (are [sexp item-group] (= item-group (parse-item-group nil (zipper sexp)))
+  (are [sexp item-group] (= item-group (parse-item-group (zipper sexp)))
     [:ItemGroupData {:ItemGroupOID "IG1" :TransactionType "Insert"}]
-    {"IG1" {:tx-type :insert}}
+    {:tx-type :insert :items {}}
 
     [:ItemGroupData {:ItemGroupOID "IG1" :TransactionType "Insert"}
      [:ItemDataString {:ItemOID "I1"} "1"]]
-    {"IG1"
-     {:tx-type :insert
-      :items
-      {"I1" {:data-type :string :value "1"}}}}
+    {:tx-type :insert
+     :items
+     {"I1" {:data-type :string :value "1"}}}
 
     [:ItemGroupData {:ItemGroupOID "IG1" :TransactionType "Insert"}
      [:ItemDataInteger {:ItemOID "I1"} "1"]]
-    {"IG1"
-     {:tx-type :insert
-      :items
-      {"I1" {:data-type :integer :value 1}}}}
+    {:tx-type :insert
+     :items
+     {"I1" {:data-type :integer :value 1}}}
 
     [:ItemGroupData {:ItemGroupOID "IG1" :TransactionType "Insert"}
      [:ItemDataFloat {:ItemOID "I1"} "1.1"]]
-    {"IG1"
-     {:tx-type :insert
-      :items
-      {"I1" {:data-type :float :value 1.1}}}}
+    {:tx-type :insert
+     :items
+     {"I1" {:data-type :float :value 1.1}}}
 
     [:ItemGroupData {:ItemGroupOID "IG1" :TransactionType "Insert"}
      [:ItemDataString {:ItemOID "I1"} "1"]
      [:ItemDataInteger {:ItemOID "I2"} "1"]]
-    {"IG1"
-     {:tx-type :insert
-      :items
-      {"I1" {:data-type :string :value "1"}
-       "I2" {:data-type :integer :value 1}}}}))
+    {:tx-type :insert
+     :items
+     {"I1" {:data-type :string :value "1"}
+      "I2" {:data-type :integer :value 1}}}))
 
 (deftest parse-form-test
-  (are [sexp form-data] (= form-data (parse-form nil (zipper sexp)))
+  (are [sexp form-data] (= form-data (parse-form (zipper sexp)))
     [:FormData {:FormOID "F1"}]
-    {"F1" {}}
+    {:item-groups {}}
+
     [:FormData {:FormOID "F1" :TransactionType "Insert"}]
-    {"F1" {:tx-type :insert}}
+    {:tx-type :insert :item-groups {}}
+
     [:FormData {:FormOID "F1"}
      [:ItemGroupData {:ItemGroupOID "IG1"}]]
-    {"F1"
-     {:item-groups
-      {"IG1" {}}}}))
+    {:item-groups
+     {"IG1" {:items {}}}}))
 
 (deftest parse-study-event-test
-  (are [sexp study-event-data] (= study-event-data (parse-study-event nil (zipper sexp)))
+  (are [sexp study-event-data] (= study-event-data (parse-study-event (zipper sexp)))
     [:StudyEventData {:StudyEventOID "SE1"}]
-    {"SE1" {}}
+    {:forms {}}
+
     [:StudyEventData {:StudyEventOID "SE1" :TransactionType "Insert"}]
-    {"SE1" {:tx-type :insert}}
+    {:tx-type :insert :forms {}}
+
     [:StudyEventData {:StudyEventOID "SE1"}
      [:FormData {:FormOID "F1"}]]
-    {"SE1"
-     {:forms
-      {"F1" {}}}}))
+    {:forms
+     {"F1" {:item-groups {}}}}))
 
 (deftest parse-subject-test
-  (are [sexp subject-data] (= subject-data (parse-subject nil (zipper sexp)))
+  (are [sexp subject-data] (= subject-data (parse-subject (zipper sexp)))
     [:SubjectData {:SubjectKey "SK1"}]
-    {"SK1" {}}
+    {:study-events {}}
+
     [:SubjectData {:SubjectKey "SK1" :TransactionType "Insert"}]
-    {"SK1" {:tx-type :insert}}
+    {:tx-type :insert :study-events {}}
+
     [:SubjectData {:SubjectKey "SK1"}
      [:StudyEventData {:StudyEventOID "SE1"}]]
-    {"SK1"
-     {:study-events
-      {"SE1" {}}}}))
+    {:study-events
+     {"SE1" {:forms {}}}}))
 
 (deftest parse-clinical-datum-test
-  (are [sexp clinical-datum] (= clinical-datum (parse-clinical-datum nil (zipper sexp)))
+  (are [sexp clinical-datum] (= clinical-datum (parse-clinical-datum (zipper sexp)))
     [:ClinicalData {:StudyOID "S1"}]
-    {"S1" {}}
+    {:subjects {}}
+
     [:ClinicalData
      {:StudyOID "S1"}
      [:SubjectData {:SubjectKey "SK1"}]]
-    {"S1"
-     {:subjects
-      {"SK1" {}}}}))
+    {:subjects
+     {"SK1" {:study-events {}}}}))
 
 (deftest file-type-coercer-test
   (is (= :snapshot (file-type-coercer "Snapshot")))
@@ -168,7 +158,8 @@
       :CreationDateTime "2016-03-18T14:41:00Z"}]
     {:file-type :snapshot
      :file-oid "F1"
-     :creation-date-time (date-time 2016 3 18 14 41)}
+     :creation-date-time (date-time 2016 3 18 14 41)
+     :clinical-data {}}
     [:ODM
      {:FileType "Snapshot"
       :FileOID "F1"
@@ -177,10 +168,10 @@
     {:file-type :snapshot
      :file-oid "F1"
      :creation-date-time (date-time 2016 3 18 14 41)
-     :clinical-data {"S1" {}}}))
+     :clinical-data {"S1" {:subjects {}}}}))
 
 (def date-time-generator (gen/return (date-time 2016 3 18 14 41)))
 
-(defspec parse-unparse-check 15
+(defspec parse-unparse-check 10
   (prop/for-all [file (g/generator ODMFile {DateTime date-time-generator})]
     (= file (parse-odm-file (zipper (unparse-odm-file file))))))
