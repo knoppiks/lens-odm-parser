@@ -1,6 +1,6 @@
 (defproject org.clojars.akiel/lens-odm-parser "0.1-SNAPSHOT"
   :description "Parses ODM XML files into a Clojure data structure."
-  :url "http://example.com/FIXME"
+  :url "https://github.com/alexanderkiel/lens-odm-parser"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
 
