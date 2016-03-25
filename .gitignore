@@ -3,4 +3,4 @@
 /.nrepl-port
 /.idea/
 /*.iml
-/pom.xml
+/pom.xml*
