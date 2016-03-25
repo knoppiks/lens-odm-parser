@@ -1,5 +1,7 @@
 # Lens ODM Parser
 
+[![Build Status](https://travis-ci.org/alexanderkiel/lens-odm-parser.svg?branch=master)](https://travis-ci.org/alexanderkiel/lens-odm-parser)
+
 Lens ODM Parser is a library which parses ODM XML files into a Clojure data structure.
 
 ## Rationale
