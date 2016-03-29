@@ -56,9 +56,9 @@ To install, just add the following to your project dependencies:
 (require '[clojure.java.io :as io])
 (require '[lens-odm-parser.core :as p])
 
-(->> (io/input-stream filename)
-     (xml/parse)
-     (p/parse-odm-file))
+(-> (io/input-stream filename)
+    (xml/parse)
+    (p/parse-odm-file))
 ```
 
 ## Data Structure
