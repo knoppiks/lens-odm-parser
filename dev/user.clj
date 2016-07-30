@@ -1,14 +1,13 @@
 (ns user
   (:use criterium.core)
-  (:use plumbing.core)
   (:require [clojure.data.xml :as xml]
             [clojure.java.io :as io]
             [clojure.pprint :refer [pprint pp]]
             [clojure.repl :refer :all]
-            [lens-odm-parser.core :as p]
-            [schema.core :as s]))
+            [clojure.spec.test :as st]
+            [lens-odm-parser.core :as p]))
 
-(s/set-fn-validation! true)
+(st/instrument)
 
 (defn parse-odm-file [filename]
   (->> (io/input-stream filename)
