@@ -328,7 +328,7 @@
   [oid :- OID {:keys [items] :as item-group} :- ItemGroup]
   [:ItemGroupData
    (item-group-attrs oid item-group)
-   (for [[oid item] items]
+   (for [[oid item] (sort-by first items)]
      (unparse-item oid item))])
 
 (defn form-attrs [oid {:keys [tx-type]}]
@@ -339,7 +339,7 @@
   [oid :- OID {:keys [item-groups] :as form} :- Form]
   [:FormData
    (form-attrs oid form)
-   (for [[oid item-group] item-groups]
+   (for [[oid item-group] (sort-by first item-groups)]
      (unparse-item-group oid item-group))])
 
 (defn study-event-attrs [oid {:keys [tx-type]}]
@@ -350,7 +350,7 @@
   [oid :- OID {:keys [forms] :as study-event} :- StudyEvent]
   [:StudyEventData
    (study-event-attrs oid study-event)
-   (for [[oid form] forms]
+   (for [[oid form] (sort-by first forms)]
      (unparse-form oid form))])
 
 (defn subject-attrs [key {:keys [tx-type]}]
@@ -361,13 +361,13 @@
   [key :- SubjectKey {:keys [study-events] :as subject} :- Subject]
   [:SubjectData
    (subject-attrs key subject)
-   (for [[oid study-event] study-events]
+   (for [[oid study-event] (sort-by first study-events)]
      (unparse-study-event oid study-event))])
 
 (s/defn unparse-clinical-datum
   [study-oid :- OID {:keys [subjects]} :- ClinicalDatum]
   [:ClinicalData {:StudyOID study-oid}
-   (for [[key subject] subjects]
+   (for [[key subject] (sort-by first subjects)]
      (unparse-subject key subject))])
 
 (s/defn unparse-odm-file [odm-file :- ODMFile]
@@ -375,5 +375,5 @@
    {:FileType (str/capitalize (name (:file-type odm-file)))
     :FileOID (:file-oid odm-file)
     :CreationDateTime (unparse-date-time (:creation-date-time odm-file))}
-   (for [[study-oid clinical-datum] (:clinical-data odm-file)]
+   (for [[study-oid clinical-datum] (sort-by first (:clinical-data odm-file))]
      (unparse-clinical-datum study-oid clinical-datum))])
