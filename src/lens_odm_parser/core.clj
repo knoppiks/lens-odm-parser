@@ -40,16 +40,13 @@
 (s/def ::element
   (s/keys :req-un [::tag ::attrs ::content]))
 
-(s/def ::data-type
-  keyword?)
-
 (s/def ::string-value string?)
 (s/def ::integer-value :odm/integer)
 (s/def ::float-value :odm/float)
 (s/def ::date-time-value :odm/date-time)
 
 (defmacro item-spec* [value-spec]
-  `(s/keys :req-un [::data-type ~value-spec] :opt-un [:odm/tx-type]))
+  `(s/keys :req-un [:odm/data-type ~value-spec] :opt-un [:odm/tx-type]))
 
 (defmulti item-spec :data-type)
 
@@ -69,25 +66,25 @@
   (s/multi-spec item-spec :data-type))
 
 (s/def ::items
-  (s/map-of :odm/item-def-oid ::item :min-count 1 :gen-max 20))
+  (s/map-of :odm.item-def/oid ::item :min-count 1 :gen-max 20))
 
 (s/def ::item-group
   (s/keys :opt-un [:odm/tx-type ::items]))
 
 (s/def ::item-groups
-  (s/map-of :odm/item-group-def-oid ::item-group :min-count 1 :gen-max 5))
+  (s/map-of :odm.item-group-def/oid ::item-group :min-count 1 :gen-max 5))
 
 (s/def ::form
   (s/keys :opt-un [:odm/tx-type ::item-groups]))
 
 (s/def ::forms
-  (s/map-of :odm/form-def-oid ::form :min-count 1 :gen-max 20))
+  (s/map-of :odm.form-def/oid ::form :min-count 1 :gen-max 20))
 
 (s/def ::study-event
   (s/keys :opt-un [:odm/tx-type ::forms]))
 
 (s/def ::study-events
-  (s/map-of :odm/study-event-oid ::study-event :min-count 1 :gen-max 5))
+  (s/map-of :odm.study-event/oid ::study-event :min-count 1 :gen-max 5))
 
 (s/def ::subject
   (s/keys :opt-un [:odm/tx-type ::study-events]))
@@ -99,10 +96,10 @@
   (s/keys :opt-un [::subjects]))
 
 (s/def ::clinical-data
-  (s/map-of :odm/study-oid ::clinical-datum :min-count 1 :gen-max 5))
+  (s/map-of :odm.study/oid ::clinical-datum :min-count 1 :gen-max 5))
 
 (s/def ::file
-  (s/keys :req-un [:odm/file-type :odm/file-oid :odm/creation-date-time]
+  (s/keys :req-un [:odm.odm/file-type :odm.odm/file-oid :odm.odm/creation-date-time]
           :opt-un [::clinical-data]))
 
 (s/def ::snapshot-file
@@ -313,7 +310,7 @@
 
 (defn- conform-file-type [x]
   (->> (conform-lc-kw x)
-       (s/conform (s/form :odm/file-type))))
+       (s/conform (s/form :odm.odm/file-type))))
 
 (s/def :odm.xml/file-type
   (conformer conform-file-type unform-cap-str

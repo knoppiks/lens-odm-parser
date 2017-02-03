@@ -8,7 +8,7 @@
   :pedantic? :abort
 
   :dependencies [[clj-time "0.12.2"]
-                 [org.clojars.akiel/odm-spec "0.2-alpha14"]
+                 [org.clojars.akiel/odm-spec "0.3-alpha14"]
                  [org.clojure/clojure "1.9.0-alpha14"]]
 
   :profiles {:dev
