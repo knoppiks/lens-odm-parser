@@ -46,7 +46,7 @@ All lists are replaced by maps from OID to the data element.
 To install, just add the following to your project dependencies:
 
 ```clojure
-[org.clojars.akiel/lens-odm-parser "0.3"]
+[org.clojars.akiel/lens-odm-parser "0.4-alpha14"]
 ```
 
 ## Usage
