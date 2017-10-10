@@ -58,7 +58,7 @@ To install, just add the following to your project dependencies:
 
 (-> (io/input-stream filename)
     (xml/parse)
-    (p/parse-odm-file))
+    (p/parse-file))
 ```
 
 ## Data Structure
