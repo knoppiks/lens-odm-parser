@@ -2,8 +2,8 @@
   "The two main functions are parse-odm-file and unparse-odm-file."
   (:require [clj-time.coerce :as tc]
             [clj-time.format :as tf]
-            [clojure.spec :as s]
-            [clojure.spec.gen :as gen]
+            [clojure.spec.alpha :as s]
+            [clojure.spec.gen.alpha :as gen]
             [clojure.string :as str]
             [odm]))
 

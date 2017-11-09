@@ -4,7 +4,7 @@
             [clojure.java.io :as io]
             [clojure.pprint :refer [pprint pp]]
             [clojure.repl :refer :all]
-            [clojure.spec.test :as st]
+            [clojure.spec.test.alpha :as st]
             [lens-odm-parser.core :as p]))
 
 (st/instrument)

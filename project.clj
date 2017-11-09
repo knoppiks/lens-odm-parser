@@ -1,4 +1,4 @@
-(defproject org.clojars.akiel/lens-odm-parser "0.4-alpha14"
+(defproject org.clojars.akiel/lens-odm-parser "0.4-RC1"
   :description "Parses ODM XML files into a Clojure data structure."
   :url "https://github.com/alexanderkiel/lens-odm-parser"
   :license {:name "Eclipse Public License"
@@ -8,8 +8,8 @@
   :pedantic? :abort
 
   :dependencies [[clj-time "0.12.2"]
-                 [org.clojars.akiel/odm-spec "0.3-alpha14"]
-                 [org.clojure/clojure "1.9.0-alpha14"]]
+                 [org.clojars.akiel/odm-spec "0.3-RC1"]
+                 [org.clojure/clojure "1.9.0-RC1"]]
 
   :profiles {:dev
              {:source-paths ["dev"]
