@@ -294,7 +294,8 @@
         :CreationDateTime "2016-03-18T14:41:00Z"}]
 
       ::file/oid := "FI01"
-      ::file/type := :snapshot))
+      ::file/type := :snapshot
+      ::file/creation-date-time := #inst "2016-03-18T14:41:00.000-00:00"))
 
   (testing "File with clinical data"
     (given-parsed "file"
@@ -305,3 +306,14 @@
        [:ClinicalData {:StudyOID "S01" :MetaDataVersionOID "V01"}]]
 
       [::file/clinical-data 0 ::clinical-data/study-oid] := "S01")))
+
+(deftest unparse-file-test
+  (given
+    (second
+      (unparse-file
+        {::file/oid "FI01"
+         ::file/type :snapshot
+         ::file/creation-date-time #inst "2016-03-18T14:41:00.000-00:00"}))
+    :FileType := "Snapshot"
+    :FileOID := "FI01"
+    :CreationDateTime := "2016-03-18T14:41:00.000Z"))
