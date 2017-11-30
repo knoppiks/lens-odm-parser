@@ -10,7 +10,7 @@
   :dependencies [[camel-snake-kebab "0.4.0"]
                  [clj-time "0.12.2"]
                  [org.clojars.akiel/odm-spec "0.5-alpha19"]
-                 [org.clojure/clojure "1.9.0-beta2"]]
+                 [org.clojure/clojure "1.9.0-RC2"]]
 
   :profiles {:dev
              {:source-paths ["dev"]
