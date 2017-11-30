@@ -24,7 +24,9 @@
     [odm.study :as study]
     [odm.study-event-data :as study-event-data]
     [odm.subject-data :as subject-data])
-  (:import [java.math MathContext]))
+  (:import
+    [java.math MathContext]
+    [java.time Instant]))
 
 (set! *warn-on-reflection* true)
 
@@ -132,7 +134,9 @@
     ::s/invalid))
 
 (defn- unform-date-time [t]
-  (tf/unparse (tf/formatters :date-time) (tc/to-date-time t)))
+  (if (instance? Instant t)
+    (str t)
+    (tf/unparse (tf/formatters :date-time) (tc/to-date-time t))))
 
 (defn xml-date-time-gen []
   (gen/fmap (fn [t] (tf/unparse (tf/formatters :date-time) (tc/from-date t)))
