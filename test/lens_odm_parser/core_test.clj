@@ -1,14 +1,16 @@
 (ns lens-odm-parser.core-test
-  (:require [clj-time.core :as t]
-            [clojure.data.xml :as xml]
-            [clojure.spec :as s]
-            [clojure.spec.test :as st]
-            [clojure.test :refer :all]
-            [clojure.test.check.clojure-test :refer [defspec]]
-            [clojure.test.check.properties :as prop]
-            [juxt.iota :refer [given]]
-            [lens-odm-parser.core :as p :refer :all])
-  (:import [java.util Date]))
+  (:require
+    [clj-time.core :as t]
+    [clojure.data.xml :as xml]
+    [clojure.spec.alpha :as s]
+    [clojure.spec.test.alpha :as st]
+    [clojure.test :refer :all]
+    [clojure.test.check.clojure-test :refer [defspec]]
+    [clojure.test.check.properties :as prop]
+    [juxt.iota :refer [given]]
+    [lens-odm-parser.core :as p :refer :all])
+  (:import
+    [java.util Date]))
 
 (st/instrument)
 
@@ -22,7 +24,7 @@
   (given-problems ::p/snapshot-file {:file-type :transactional
                                      :file-oid "F1"
                                      :creation-date-time (Date.)}
-    [0 :pred] := '(= :snapshot (:file-type %))))
+    [0 :pred] := `(fn [~'%] (= :snapshot (:file-type ~'%)))))
 
 (deftest transactional-file-test
   (is (s/valid? ::p/transactional-file {:file-type :transactional :file-oid "F1"
@@ -30,7 +32,7 @@
   (given-problems ::p/transactional-file {:file-type :snapshot
                                           :file-oid "F1"
                                           :creation-date-time (Date.)}
-    [0 :pred] := '(= :transactional (:file-type %))))
+    [0 :pred] := `(fn [~'%] (= :transactional (:file-type ~'%)))))
 
 (deftest item-spec-test
   (testing "valid items"
@@ -41,12 +43,12 @@
       {:data-type :date-time :date-time-value (Date.)}))
   (testing "invalid data type"
     (given-problems ::p/item {:data-type :foo}
-      [0 :pred] := 'item-spec
+      [0 :pred] := `item-spec
       [0 :path] := [:foo]
       [0 :via] := [::p/item]))
   (testing "invalid string value"
     (given-problems ::p/item {:data-type :string :string-value 1}
-      [0 :pred] := 'string?
+      [0 :pred] := `string?
       [0 :path] := [:string :string-value]
       [0 :via] := [::p/item ::p/string-value]))
   (testing "invalid transaction type"
