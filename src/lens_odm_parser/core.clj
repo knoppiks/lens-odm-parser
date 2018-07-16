@@ -803,8 +803,15 @@
     (map unparse-subject-data)
     subject-data))
 
+(s/def :xml/sexp
+  (s/spec (s/cat :tag keyword?
+                 :attr (s/? (s/map-of keyword? any?))
+                 :content (s/* (s/alt :sexpr :xml/sexp
+                                      :text any?)))))
+
 (s/fdef unparse-file
-  :args (s/cat :file :odm/file))
+  :args (s/cat :file :odm/file)
+  :ret :xml/sexp)
 
 (defn unparse-file
   [{:keys [odm.file/clinical-data] :as file}]

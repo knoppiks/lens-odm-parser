@@ -308,12 +308,18 @@
       [::file/clinical-data 0 ::clinical-data/study-oid] := "S01")))
 
 (deftest unparse-file-test
-  (given
-    (second
-      (unparse-file
-        {::file/oid "FI01"
-         ::file/type :snapshot
-         ::file/creation-date-time #inst "2016-03-18T14:41:00.000-00:00"}))
-    :FileType := "Snapshot"
-    :FileOID := "FI01"
-    :CreationDateTime := "2016-03-18T14:41:00.000Z"))
+  (testing "Concrete example"
+    (given
+      (second
+        (unparse-file
+          {::file/oid "FI01"
+           ::file/type :snapshot
+           ::file/creation-date-time #inst "2016-03-18T14:41:00.000-00:00"}))
+      :FileType := "Snapshot"
+      :FileOID := "FI01"
+      :CreationDateTime := "2016-03-18T14:41:00.000Z"))
+
+  (testing "Spec check"
+    (is
+      (->> (st/check `unparse-file)
+           (every? #(get-in % [:clojure.spec.test.check/ret :result]))))))
