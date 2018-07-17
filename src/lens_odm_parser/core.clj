@@ -814,6 +814,7 @@
   :ret :xml/sexp)
 
 (defn unparse-file
+  "Takes a parsed ODM file and unparses it into an sexp."
   [{:keys [odm.file/clinical-data] :as file}]
   (into
     [:ODM
