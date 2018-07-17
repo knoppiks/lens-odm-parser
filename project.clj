@@ -8,13 +8,13 @@
   :pedantic? :abort
 
   :dependencies [[camel-snake-kebab "0.4.0"]
-                 [clj-time "0.12.2"]
+                 [clj-time "0.14.4"]
                  [org.clojars.akiel/odm-spec "0.5-alpha19"]
-                 [org.clojure/clojure "1.9.0-RC2"]]
+                 [org.clojure/clojure "1.9.0"]]
 
   :profiles {:dev
              {:source-paths ["dev"]
-              :dependencies [[com.gfredericks/test.chuck "0.2.7"]
+              :dependencies [[com.gfredericks/test.chuck "0.2.9"]
                              [criterium "0.4.4"]
                              [org.clojars.akiel/iota "0.1"]
                              [org.clojure/data.xml "0.0.8"]
