@@ -181,10 +181,24 @@
                 (name tag) (name (:tag e)))
         {:type ::validation-error :element e :expected-child-tag tag}))))
 
-(defn- parse-childs [tag parse-fn content]
-  (into [] (comp (filter (tag= tag)) (map parse-fn)) content))
+(defmulti parse*
+  "Parses XML Element. Dispatches by :tag."
+  {:arglists '([element])}
+  :tag)
 
-(defn parse-global-variables
+(s/fdef parse
+  :args (s/cat :element ::element))
+
+(defn parse [element]
+  (parse* element))
+
+(defn- parse-children
+  ([tag content]
+   (into [] (comp (filter (tag= tag)) (map parse)) content))
+  ([tag parse-fn content]
+   (into [] (comp (filter (tag= tag)) (map parse-fn)) content)))
+
+(defmethod parse* :GlobalVariables
   [{:keys [content] :as global-variables}]
   (check-sub-tag :StudyName global-variables)
   (check-sub-tag :StudyDescription global-variables)
@@ -202,25 +216,17 @@
   (s/conformer conform-yes-no #(if % "Yes" "No")))
 
 ;; TODO: language tag
-(defn parse-translated-text
+(defmethod parse* :TranslatedText
   [{:keys [attrs] :as translated-text}]
   {:text (string-value translated-text)})
 
-(s/fdef parse-description
-  :args (s/cat :description (s/and ::element (tag= :Description)))
-  :ret :odm/description)
-
-(defn parse-description
+(defmethod parse* :Description
   [{:keys [content]}]
-  (parse-childs :TranslatedText parse-translated-text content))
+  (parse-children :TranslatedText content))
 
-(s/fdef parse-question
-  :args (s/cat :question (s/and ::element (tag= :Question)))
-  :ret ::item-def/question)
-
-(defn parse-question
+(defmethod parse* :Question
   [{:keys [content]}]
-  (parse-childs :TranslatedText parse-translated-text content))
+  (parse-children :TranslatedText content))
 
 (defn- coerce-oid [e s]
   (coerce :odm.data-formats/oid e s))
@@ -231,30 +237,18 @@
 (defn- coerce-float [e s]
   (coerce :odm.xml/float e s))
 
-(s/fdef parse-code-list-ref
-  :args (s/cat :code-list-ref (s/and ::element (tag= :CodeListRef)))
-  :ret :odm/code-list-ref)
-
-(defn parse-code-list-ref
+(defmethod parse* :CodeListRef
   [{:keys [attrs] :as code-list-ref}]
   #:odm.code-list-ref
       {:code-list-oid (coerce-oid code-list-ref (:CodeListOID attrs))})
 
-(s/fdef parse-alias
-  :args (s/cat :alias (s/and ::element (tag= :Alias)))
-  :ret :odm/alias)
-
-(defn parse-alias
+(defmethod parse* :Alias
   [{:keys [attrs] :as alias}]
   #:odm.alias
       {:context (coerce :odm.data-formats/text alias (:Context attrs))
        :name (coerce :odm.data-formats/text alias (:Name attrs))})
 
-(s/fdef parse-item-group-ref
-  :args (s/cat :item-group-ref (s/and ::element (tag= :ItemGroupRef)))
-  :ret :odm/item-group-ref)
-
-(defn parse-item-group-ref
+(defmethod parse* :ItemGroupRef
   [{:keys [attrs content] :as item-group-ref}]
   (cond-> #::item-group-ref
       {:item-group-oid (coerce-oid item-group-ref (:ItemGroupOID attrs))
@@ -267,11 +261,7 @@
     (assoc :odm.ref/collection-exception-condition-oid
            (coerce-oid item-group-ref (:CollectionExceptionConditionOID attrs)))))
 
-(s/fdef parse-item-ref
-  :args (s/cat :item-ref (s/and ::element (tag= :ItemRef)))
-  :ret :odm/item-ref)
-
-(defn parse-item-ref
+(defmethod parse* :ItemRef
   [{:keys [attrs content] :as item-ref}]
   (cond-> #::item-ref
       {:item-oid (coerce-oid item-ref (:ItemOID attrs))
@@ -284,15 +274,11 @@
     (assoc :odm.ref/collection-exception-condition-oid
            (coerce-oid item-ref (:CollectionExceptionConditionOID attrs)))))
 
-(s/fdef parse-form-def
-  :args (s/cat :form-def (s/and ::element (tag= :FormDef)))
-  :ret :odm/form-def)
-
-(defn parse-form-def
+(defmethod parse* :FormDef
   [{:keys [attrs content] :as form-def}]
-  (let [parse-childs #(parse-childs %1 %2 content)
-        description (first (parse-childs :Description parse-description))
-        item-group-refs (parse-childs :ItemGroupRef parse-item-group-ref)]
+  (let [parse-children #(parse-children %1 content)
+        description (first (parse-children :Description))
+        item-group-refs (parse-children :ItemGroupRef)]
     (cond-> #::form-def
         {:oid (coerce-oid form-def (:OID attrs))
          :name (coerce :odm.data-formats/name form-def (:Name attrs))
@@ -304,15 +290,11 @@
       (not (empty? item-group-refs))
       (assoc ::form-def/item-group-refs item-group-refs))))
 
-(s/fdef parse-item-group-def
-  :args (s/cat :item-group-def (s/and ::element (tag= :ItemGroupDef)))
-  :ret :odm/item-group-def)
-
-(defn parse-item-group-def
+(defmethod parse* :ItemGroupDef
   [{:keys [attrs content] :as item-group-def}]
-  (let [parse-childs #(parse-childs %1 %2 content)
-        description (first (parse-childs :Description parse-description))
-        item-refs (parse-childs :ItemRef parse-item-ref)]
+  (let [parse-children #(parse-children %1 content)
+        description (first (parse-children :Description))
+        item-refs (parse-children :ItemRef)]
     (cond-> #::item-group-def
         {:oid (coerce-oid item-group-def (:OID attrs))
          :name (coerce :odm.data-formats/name item-group-def (:Name attrs))
@@ -350,17 +332,13 @@
 (s/def :odm.xml/data-type
   (s/conformer conform-data-type name))
 
-(s/fdef parse-item-def
-  :args (s/cat :item-def (s/and ::element (tag= :ItemDef)))
-  :ret :odm/item-def)
-
-(defn parse-item-def
+(defmethod parse* :ItemDef
   [{:keys [attrs content] :as item-def}]
-  (let [parse-childs #(parse-childs %1 %2 content)
-        description (first (parse-childs :Description parse-description))
-        question (first (parse-childs :Question parse-question))
-        code-list-ref (first (parse-childs :CodeListRef parse-code-list-ref))
-        aliases (parse-childs :Alias parse-alias)]
+  (let [parse-children #(parse-children %1 content)
+        description (first (parse-children :Description))
+        question (first (parse-children :Question))
+        code-list-ref (first (parse-children :CodeListRef))
+        aliases (parse-children :Alias)]
     (cond-> #::item-def
         {:oid (coerce-oid item-def (:OID attrs))
          :name (coerce :odm.data-formats/name item-def (:Name attrs))
@@ -381,25 +359,17 @@
       (not (empty? aliases))
       (assoc :odm/aliases aliases))))
 
-(s/fdef parse-decode
-  :args (s/cat :decode (s/and ::element (tag= :Decode)))
-  :ret ::code-list-item/decode)
-
-(defn parse-decode
+(defmethod parse* :Decode
   [{:keys [content]}]
-  (parse-childs :TranslatedText parse-translated-text content))
+  (parse-children :TranslatedText content))
 
-(s/fdef parse-code-list-item
-  :args (s/cat :code-list-item (s/and ::element (tag= :CodeListItem)))
-  :ret :odm/code-list-item)
-
-(defn parse-code-list-item
+(defmethod parse* :CodeListItem
   [{:keys [attrs content] :as code-list-item}]
-  (let [parse-childs #(parse-childs %1 %2 content)
-        aliases (parse-childs :Alias parse-alias)]
+  (let [parse-children #(parse-children %1 content)
+        aliases (parse-children :Alias)]
     (cond-> #::code-list-item
         {:coded-value (coerce-oid code-list-item (:CodedValue attrs))
-         :decode (first (parse-childs :Decode parse-decode))}
+         :decode (first (parse-children :Decode))}
 
       (:Rank attrs)
       (assoc ::code-list-item/rank (coerce-float code-list-item (:Rank attrs)))
@@ -418,16 +388,12 @@
 (s/def :odm.xml.code-list/data-type
   (s/conformer conform-code-list-data-type name))
 
-(s/fdef parse-code-list
-  :args (s/cat :code-list (s/and ::element (tag= :CodeList)))
-  :ret :odm/code-list)
-
-(defn parse-code-list
+(defmethod parse* :CodeList
   [{:keys [attrs content] :as code-list}]
-  (let [parse-childs #(parse-childs %1 %2 content)
-        description (first (parse-childs :Description parse-description))
-        code-list-items (parse-childs :CodeListItem parse-code-list-item)
-        aliases (parse-childs :Alias parse-alias)]
+  (let [parse-children #(parse-children %1 content)
+        description (first (parse-children :Description))
+        code-list-items (parse-children :CodeListItem)
+        aliases (parse-children :Alias)]
     (cond-> #::code-list
         {:oid (coerce-oid code-list (:OID attrs))
          :name (coerce :odm.data-formats/name code-list (:Name attrs))
@@ -442,17 +408,13 @@
       (not (empty? aliases))
       (assoc :odm/aliases aliases))))
 
-(s/fdef parse-metadata-version
-  :args (s/cat :metadata-version (s/and ::element (tag= :MetaDataVersion)))
-  :ret :odm/metadata-version)
-
-(defn parse-metadata-version
+(defmethod parse* :MetaDataVersion
   [{:keys [attrs content] :as metadata-version}]
-  (let [parse-childs #(parse-childs %1 %2 content)
-        form-defs (parse-childs :FormDef parse-form-def)
-        item-group-defs (parse-childs :ItemGroupDef parse-item-group-def)
-        item-defs (parse-childs :ItemDef parse-item-def)
-        code-lists (parse-childs :CodeList parse-code-list)]
+  (let [parse-children #(parse-children %1 content)
+        form-defs (parse-children :FormDef)
+        item-group-defs (parse-children :ItemGroupDef)
+        item-defs (parse-children :ItemDef)
+        code-lists (parse-children :CodeList)]
     (cond-> #::metadata-version
         {:oid (coerce-oid metadata-version (:OID attrs))
          :name (coerce :odm.data-formats/name metadata-version (:Name attrs))}
@@ -472,16 +434,12 @@
       (not (empty? code-lists))
       (assoc ::metadata-version/code-lists code-lists))))
 
-(s/fdef parse-study
-  :args (s/cat :study (s/and ::element (tag= :Study)))
-  :ret :odm/study)
-
-(defn parse-study
+(defmethod parse* :Study
   [{:keys [attrs content] :as study}]
   (check-sub-tag :GlobalVariables study)
-  (let [parse-childs #(parse-childs %1 %2 content)
-        global-variables (first (parse-childs :GlobalVariables parse-global-variables))
-        metadata-versions (parse-childs :MetaDataVersion parse-metadata-version)]
+  (let [parse-children #(parse-children %1 content)
+        global-variables (first (parse-children :GlobalVariables))
+        metadata-versions (parse-children :MetaDataVersion)]
     (cond-> (merge {::study/oid (:OID attrs)} global-variables)
 
       (not (empty? metadata-versions))
@@ -624,9 +582,8 @@
   :element :value and :error in ex-data."
   [{:keys [attrs content] :as file}]
   (check-tag :ODM file)
-  (let [parse-childs #(parse-childs %1 %2 content)
-        studies (parse-childs :Study parse-study)
-        clinical-data (parse-childs :ClinicalData parse-clinical-data)]
+  (let [studies (parse-children :Study content)
+        clinical-data (parse-children :ClinicalData parse-clinical-data content)]
     (cond-> #:odm.file
         {:type (coerce :odm.xml/file-type file (:FileType attrs))
          :oid (:FileOID attrs)

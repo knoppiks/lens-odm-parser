@@ -16,7 +16,6 @@
     [odm.study-event-data :as study-event-data]
     [odm.subject-data :as subject-data])
   (:import
-    [java.util Date]
     [java.math MathContext]))
 
 (st/instrument)
