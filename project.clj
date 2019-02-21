@@ -9,9 +9,9 @@
 
   :dependencies
   [[camel-snake-kebab "0.4.0"]
-   [clj-time "0.14.4"]
+   [clj-time "0.15.1"]
    [org.clojars.akiel/odm-spec "0.5-alpha19"]
-   [org.clojure/clojure "1.9.0"]]
+   [org.clojure/clojure "1.10.0"]]
 
   :profiles
   {:dev
