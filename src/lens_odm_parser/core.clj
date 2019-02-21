@@ -181,7 +181,7 @@
                 (name tag) (name (:tag e)))
         {:type ::validation-error :element e :expected-child-tag tag}))))
 
-(defn- parse-childs [tag parse-fn content]
+(defn- parse-children [tag parse-fn content]
   (into [] (comp (filter (tag= tag)) (map parse-fn)) content))
 
 (defn parse-global-variables
@@ -212,7 +212,7 @@
 
 (defn parse-description
   [{:keys [content]}]
-  (parse-childs :TranslatedText parse-translated-text content))
+  (parse-children :TranslatedText parse-translated-text content))
 
 (s/fdef parse-question
   :args (s/cat :question (s/and ::element (tag= :Question)))
@@ -220,7 +220,7 @@
 
 (defn parse-question
   [{:keys [content]}]
-  (parse-childs :TranslatedText parse-translated-text content))
+  (parse-children :TranslatedText parse-translated-text content))
 
 (defn- coerce-oid [e s]
   (coerce :odm.data-formats/oid e s))
@@ -290,9 +290,9 @@
 
 (defn parse-form-def
   [{:keys [attrs content] :as form-def}]
-  (let [parse-childs #(parse-childs %1 %2 content)
-        description (first (parse-childs :Description parse-description))
-        item-group-refs (parse-childs :ItemGroupRef parse-item-group-ref)]
+  (let [parse-children #(parse-children %1 %2 content)
+        description (first (parse-children :Description parse-description))
+        item-group-refs (parse-children :ItemGroupRef parse-item-group-ref)]
     (cond-> #::form-def
         {:oid (coerce-oid form-def (:OID attrs))
          :name (coerce :odm.data-formats/name form-def (:Name attrs))
@@ -310,9 +310,9 @@
 
 (defn parse-item-group-def
   [{:keys [attrs content] :as item-group-def}]
-  (let [parse-childs #(parse-childs %1 %2 content)
-        description (first (parse-childs :Description parse-description))
-        item-refs (parse-childs :ItemRef parse-item-ref)]
+  (let [parse-children #(parse-children %1 %2 content)
+        description (first (parse-children :Description parse-description))
+        item-refs (parse-children :ItemRef parse-item-ref)]
     (cond-> #::item-group-def
         {:oid (coerce-oid item-group-def (:OID attrs))
          :name (coerce :odm.data-formats/name item-group-def (:Name attrs))
@@ -356,11 +356,11 @@
 
 (defn parse-item-def
   [{:keys [attrs content] :as item-def}]
-  (let [parse-childs #(parse-childs %1 %2 content)
-        description (first (parse-childs :Description parse-description))
-        question (first (parse-childs :Question parse-question))
-        code-list-ref (first (parse-childs :CodeListRef parse-code-list-ref))
-        aliases (parse-childs :Alias parse-alias)]
+  (let [parse-children #(parse-children %1 %2 content)
+        description (first (parse-children :Description parse-description))
+        question (first (parse-children :Question parse-question))
+        code-list-ref (first (parse-children :CodeListRef parse-code-list-ref))
+        aliases (parse-children :Alias parse-alias)]
     (cond-> #::item-def
         {:oid (coerce-oid item-def (:OID attrs))
          :name (coerce :odm.data-formats/name item-def (:Name attrs))
@@ -387,7 +387,7 @@
 
 (defn parse-decode
   [{:keys [content]}]
-  (parse-childs :TranslatedText parse-translated-text content))
+  (parse-children :TranslatedText parse-translated-text content))
 
 (s/fdef parse-code-list-item
   :args (s/cat :code-list-item (s/and ::element (tag= :CodeListItem)))
@@ -395,11 +395,11 @@
 
 (defn parse-code-list-item
   [{:keys [attrs content] :as code-list-item}]
-  (let [parse-childs #(parse-childs %1 %2 content)
-        aliases (parse-childs :Alias parse-alias)]
+  (let [parse-children #(parse-children %1 %2 content)
+        aliases (parse-children :Alias parse-alias)]
     (cond-> #::code-list-item
         {:coded-value (coerce-oid code-list-item (:CodedValue attrs))
-         :decode (first (parse-childs :Decode parse-decode))}
+         :decode (first (parse-children :Decode parse-decode))}
 
       (:Rank attrs)
       (assoc ::code-list-item/rank (coerce-float code-list-item (:Rank attrs)))
@@ -424,10 +424,10 @@
 
 (defn parse-code-list
   [{:keys [attrs content] :as code-list}]
-  (let [parse-childs #(parse-childs %1 %2 content)
-        description (first (parse-childs :Description parse-description))
-        code-list-items (parse-childs :CodeListItem parse-code-list-item)
-        aliases (parse-childs :Alias parse-alias)]
+  (let [parse-children #(parse-children %1 %2 content)
+        description (first (parse-children :Description parse-description))
+        code-list-items (parse-children :CodeListItem parse-code-list-item)
+        aliases (parse-children :Alias parse-alias)]
     (cond-> #::code-list
         {:oid (coerce-oid code-list (:OID attrs))
          :name (coerce :odm.data-formats/name code-list (:Name attrs))
@@ -448,11 +448,11 @@
 
 (defn parse-metadata-version
   [{:keys [attrs content] :as metadata-version}]
-  (let [parse-childs #(parse-childs %1 %2 content)
-        form-defs (parse-childs :FormDef parse-form-def)
-        item-group-defs (parse-childs :ItemGroupDef parse-item-group-def)
-        item-defs (parse-childs :ItemDef parse-item-def)
-        code-lists (parse-childs :CodeList parse-code-list)]
+  (let [parse-children #(parse-children %1 %2 content)
+        form-defs (parse-children :FormDef parse-form-def)
+        item-group-defs (parse-children :ItemGroupDef parse-item-group-def)
+        item-defs (parse-children :ItemDef parse-item-def)
+        code-lists (parse-children :CodeList parse-code-list)]
     (cond-> #::metadata-version
         {:oid (coerce-oid metadata-version (:OID attrs))
          :name (coerce :odm.data-formats/name metadata-version (:Name attrs))}
@@ -479,9 +479,9 @@
 (defn parse-study
   [{:keys [attrs content] :as study}]
   (check-sub-tag :GlobalVariables study)
-  (let [parse-childs #(parse-childs %1 %2 content)
-        global-variables (first (parse-childs :GlobalVariables parse-global-variables))
-        metadata-versions (parse-childs :MetaDataVersion parse-metadata-version)]
+  (let [parse-children #(parse-children %1 %2 content)
+        global-variables (first (parse-children :GlobalVariables parse-global-variables))
+        metadata-versions (parse-children :MetaDataVersion parse-metadata-version)]
     (cond-> (merge {::study/oid (:OID attrs)} global-variables)
 
       (not (empty? metadata-versions))
@@ -624,9 +624,9 @@
   :element :value and :error in ex-data."
   [{:keys [attrs content] :as file}]
   (check-tag :ODM file)
-  (let [parse-childs #(parse-childs %1 %2 content)
-        studies (parse-childs :Study parse-study)
-        clinical-data (parse-childs :ClinicalData parse-clinical-data)]
+  (let [parse-children #(parse-children %1 %2 content)
+        studies (parse-children :Study parse-study)
+        clinical-data (parse-children :ClinicalData parse-clinical-data)]
     (cond-> #:odm.file
         {:type (coerce :odm.xml/file-type file (:FileType attrs))
          :oid (:FileOID attrs)
