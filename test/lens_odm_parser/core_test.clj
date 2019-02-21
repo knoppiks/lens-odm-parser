@@ -109,13 +109,13 @@
       Double/NEGATIVE_INFINITY
       Double/NaN)))
 
-(defmacro given-parsed [kind sexp & body]
-  `(given (~(symbol (str "parse-" kind)) (element ~sexp))
+(defmacro given-parsed [sexp & body]
+  `(given (parse (element ~sexp))
      ~@body))
 
 (deftest parse-item-data-test
   (testing "String item data"
-    (given-parsed "item-data"
+    (given-parsed
       [:ItemDataString {:ItemOID "I01"} "1"]
 
       ::item-data/item-oid := "I01"
@@ -123,7 +123,7 @@
       ::item-data/string-value := "1"))
 
   (testing "Integer item data"
-    (given-parsed "item-data"
+    (given-parsed 
       [:ItemDataInteger {:ItemOID "I01"} "1"]
 
       ::item-data/item-oid := "I01"
@@ -131,7 +131,7 @@
       ::item-data/integer-value := 1))
 
   (testing "Float item data"
-    (given-parsed "item-data"
+    (given-parsed 
       [:ItemDataFloat {:ItemOID "I01"} "1"]
 
       ::item-data/item-oid := "I01"
@@ -139,7 +139,7 @@
       ::item-data/float-value := 1))
 
   (testing "Date-time item data"
-    (given-parsed "item-data"
+    (given-parsed 
       [:ItemDataDatetime {:ItemOID "I01"} "2017-02-13T07:50:00.000Z"]
 
       ::item-data/item-oid := "I01"
@@ -172,18 +172,18 @@
 (deftest item-data-parse-unparse-test
   (checking "item-data-parse-unparse" 1000
     [item-data (s/gen :odm/item-data)]
-    (=double item-data (parse-item-data (element (unparse-item-data item-data))))))
+    (=double item-data (parse (element (unparse-item-data item-data))))))
 
 (deftest parse-item-group-data-test
   (testing "Item group data without item data"
-    (given-parsed "item-group-data"
+    (given-parsed
       [:ItemGroupData {:ItemGroupOID "IG01" :TransactionType "Insert"}]
 
       ::item-group-data/item-group-oid := "IG01"
       :odm/tx-type := :insert))
 
   (testing "Item group data with one item data element"
-    (given-parsed "item-group-data"
+    (given-parsed
       [:ItemGroupData {:ItemGroupOID "IG01"}
        [:ItemDataString {:ItemOID "I01"} "1"]]
 
@@ -192,7 +192,7 @@
       [::item-group-data/item-data 0 ::item-data/string-value] := "1"))
 
   (testing "Item group data with two item data elements"
-    (given-parsed "item-group-data"
+    (given-parsed
       [:ItemGroupData {:ItemGroupOID "IG01"}
        [:ItemDataString {:ItemOID "I01"} "1"]
        [:ItemDataInteger {:ItemOID "I02"} "1"]]
@@ -205,17 +205,17 @@
 (deftest item-group-data-parse-unparse-test
   (checking "item-group-data-parse-unparse" 100
     [item-group-data (s/gen :odm/item-group-data)]
-    (=double item-group-data (parse-item-group-data (element (unparse-item-group-data item-group-data))))))
+    (=double item-group-data (parse (element (unparse-item-group-data item-group-data))))))
 
 (deftest parse-form-data-test
   (testing "Form data without item group data"
-    (given-parsed "form-data"
+    (given-parsed
       [:FormData {:FormOID "F01"}]
 
       ::form-data/form-oid := "F01"))
 
   (testing "Form data with one item group data element"
-    (given-parsed "form-data"
+    (given-parsed
       [:FormData {:FormOID "F01"}
        [:ItemGroupData {:ItemGroupOID "IG01"}]]
 
@@ -224,17 +224,17 @@
 (deftest form-data-parse-unparse-test
   (checking "form-data-parse-unparse" 100
     [form-data (s/gen :odm/form-data)]
-    (=double form-data (parse-form-data (element (unparse-form-data form-data))))))
+    (=double form-data (parse (element (unparse-form-data form-data))))))
 
 (deftest parse-study-event-data-test
   (testing "Study event data without form data"
-    (given-parsed "study-event-data"
+    (given-parsed
       [:StudyEventData {:StudyEventOID "SE01"}]
 
       ::study-event-data/study-event-oid := "SE01"))
 
   (testing "Study event data with one form data element"
-    (given-parsed "study-event-data"
+    (given-parsed
       [:StudyEventData {:StudyEventOID "SE01"}
        [:FormData {:FormOID "F01"}]]
 
@@ -243,17 +243,17 @@
 (deftest study-event-data-parse-unparse-test
   (checking "study-event-data-parse-unparse" 100
     [study-event-data (s/gen :odm/study-event-data)]
-    (=double study-event-data (parse-study-event-data (element (unparse-study-event-data study-event-data))))))
+    (=double study-event-data (parse (element (unparse-study-event-data study-event-data))))))
 
 (deftest parse-subject-data-test
   (testing "Subject data without study event data"
-    (given-parsed "subject-data"
+    (given-parsed
       [:SubjectData {:SubjectKey "SK01"}]
 
       ::subject-data/subject-key := "SK01"))
 
   (testing "Subject data with one study event data element"
-    (given-parsed "subject-data"
+    (given-parsed
       [:SubjectData {:SubjectKey "SK01"}
        [:StudyEventData {:StudyEventOID "SE01"}]]
 
@@ -262,18 +262,18 @@
 (deftest subject-data-parse-unparse-test
   (checking "subject-data-parse-unparse" 10
     [subject-data (s/gen :odm/subject-data)]
-    (=double subject-data (parse-subject-data (element (unparse-subject-data subject-data))))))
+    (=double subject-data (parse (element (unparse-subject-data subject-data))))))
 
 (deftest parse-clinical-data-test
   (testing "Clinical data without subject data"
-    (given-parsed "clinical-data"
+    (given-parsed
       [:ClinicalData {:StudyOID "S01" :MetaDataVersionOID "V01"}]
 
       ::clinical-data/study-oid := "S01"
       ::clinical-data/metadata-version-oid := "V01"))
 
   (testing "Clinical data with one subject data element"
-    (given-parsed "clinical-data"
+    (given-parsed
       [:ClinicalData {:StudyOID "S01" :MetaDataVersionOID "V01"}
        [:SubjectData {:SubjectKey "SK01"}]]
 
@@ -282,11 +282,11 @@
 (deftest clinical-data-parse-unparse-test
   (checking "clinical-data-parse-unparse" 10
     [clinical-data (s/gen :odm/clinical-data)]
-    (=double clinical-data (parse-clinical-data (element (unparse-clinical-data clinical-data))))))
+    (=double clinical-data (parse (element (unparse-clinical-data clinical-data))))))
 
 (deftest parse-file-test
   (testing "File without clinical data"
-    (given-parsed "file"
+    (given-parsed
       [:ODM
        {:FileType "Snapshot"
         :FileOID "FI01"
@@ -297,7 +297,7 @@
       ::file/creation-date-time := #inst "2016-03-18T14:41:00.000-00:00"))
 
   (testing "File with clinical data"
-    (given-parsed "file"
+    (given-parsed
       [:ODM
        {:FileType "Snapshot"
         :FileOID "FI01"
