@@ -15,7 +15,7 @@
 (defn parse-file [filename]
   (->> (io/input-stream filename)
        (xml/parse)
-       (p/parse-file)))
+       (p/parse)))
 
 (comment
   (s/valid? :odm/file (parse-file ""))

@@ -1,5 +1,9 @@
 (ns lens-odm-parser.core
-  "The two main functions are parse-file and unparse-file."
+  "The two main functions are parse and unparse-file.
+
+  Example: `(-> (io/input-stream \"odm-file.xml\")
+            (xml/parse)
+            (parse))`"
   (:require
     [camel-snake-kebab.core :refer [->kebab-case-keyword]]
     [clj-time.coerce :as tc]
@@ -192,11 +196,8 @@
 (defn parse [element]
   (parse* element))
 
-(defn- parse-children
-  ([tag content]
-   (into [] (comp (filter (tag= tag)) (map parse)) content))
-  ([tag parse-fn content]
-   (into [] (comp (filter (tag= tag)) (map parse-fn)) content)))
+(defn- parse-children [tag content]
+  (into [] (comp (filter (tag= tag)) (map parse)) content))
 
 (defmethod parse* :GlobalVariables
   [{:keys [content] :as global-variables}]
@@ -463,105 +464,109 @@
 
 (defn- data-item
   [{:keys [attrs] :as item-data} data-type]
-  (-> (data item-data)
-      (assoc ::item-data/item-oid (:ItemOID attrs)
-             ::item-data/data-type data-type)))
+  (assoc (data item-data)
+    ::item-data/item-oid (:ItemOID attrs)
+    ::item-data/data-type data-type))
 
-(defmulti parse-item-data*
-  {:arglists '([item-data])}
-  :tag)
-
-(defmethod parse-item-data* :ItemDataString
+(defmethod parse* :ItemDataString
   [item-data]
-  (-> (data-item item-data :string)
-      (assoc ::item-data/string-value (string-value item-data))))
+  (assoc (data-item item-data :string)
+    ::item-data/string-value (string-value item-data)))
 
-(defmethod parse-item-data* :ItemDataInteger
+(defmethod parse* :ItemDataInteger
   [{:keys [attrs] :as item-data}]
-  (-> (data-item item-data :integer)
-      (assoc ::item-data/integer-value (integer-value item-data))
-      (assoc-when ::item-data/measurement-unit-oid (:MeasurementUnitOID attrs))))
+  (let [measurement-unit (:MeasurementUnitOID attrs)]
+    (cond->
+      (assoc (data-item item-data :integer)
+        ::item-data/integer-value (integer-value item-data))
 
-(defmethod parse-item-data* :ItemDataFloat
+      measurement-unit
+      (assoc ::item-data/measurement-unit-oid measurement-unit))))
+
+(defmethod parse* :ItemDataFloat
   [{:keys [attrs] :as item-data}]
-  (-> (data-item item-data :float)
-      (assoc ::item-data/float-value (float-value item-data))
-      (assoc-when ::item-data/measurement-unit-oid (:MeasurementUnitOID attrs))))
+  (let [measurement-unit (:MeasurementUnitOID attrs)]
+    (cond->
+      (assoc (data-item item-data :float)
+        ::item-data/float-value (float-value item-data))
 
-(defmethod parse-item-data* :ItemDataDatetime
+      measurement-unit
+      (assoc ::item-data/measurement-unit-oid measurement-unit))))
+
+(defmethod parse* :ItemDataDatetime
   [item-data]
-  (-> (data-item item-data :date-time)
-      (assoc ::item-data/date-time-value (date-time-value item-data))))
+  (assoc (data-item item-data :date-time)
+    ::item-data/date-time-value (date-time-value item-data)))
 
-(defmethod parse-item-data* :ItemDataBoolean
+(defmethod parse* :ItemDataBoolean
   [item-data]
-  (-> (data-item item-data :boolean)
-      (assoc ::item-data/boolean-value (boolean-value item-data))))
+  (assoc (data-item item-data :boolean)
+    ::item-data/boolean-value (boolean-value item-data)))
 
-(s/fdef parse-item-data
-  :args (s/cat :item-data ::element)
-  :ret :odm/item-data)
-
-(defn parse-item-data [item-data]
-  (parse-item-data* item-data))
-
-(s/fdef parse-item-group-data
-  :args (s/cat :item-group-data (s/and ::element (tag= :ItemGroupData)))
-  :ret :odm/item-group-data)
-
-(defn parse-item-group-data
+(defmethod parse* :ItemGroupData
   [{:keys [attrs content] :as item-group-data}]
-  (check-tag :ItemGroupData item-group-data)
-  (-> (data item-group-data)
-      (assoc ::item-group-data/item-group-oid (:ItemGroupOID attrs))
-      (assoc-when ::item-group-data/item-group-repeat-key (:ItemGroupRepeatKey attrs))
-      (assoc-when ::item-group-data/item-data (seq (map parse-item-data content)))))
+  (let [item-group-repeat-key (:ItemGroupRepeatKey attrs)
+        item-data (map parse content)]
+    (cond->
+      (assoc (data item-group-data)
+        ::item-group-data/item-group-oid (:ItemGroupOID attrs))
 
-(s/fdef parse-form-data
-  :args (s/cat :form-data (s/and ::element (tag= :FormData)))
-  :ret :odm/form-data)
+      item-group-repeat-key
+      (assoc ::item-group-data/item-group-repeat-key item-group-repeat-key)
 
-(defn parse-form-data
+      (not (empty? item-data))
+      (assoc ::item-group-data/item-data item-data))))
+
+(defmethod parse* :FormData
   [{:keys [attrs content] :as form-data}]
   (check-tag :FormData form-data)
-  (-> (data form-data)
-      (assoc ::form-data/form-oid (:FormOID attrs))
-      (assoc-when ::form-data/form-repeat-key (:FormRepeatKey attrs))
-      (assoc-when ::form-data/item-group-data (seq (map parse-item-group-data content)))))
+  (let [form-repeat-key (:FormRepeatKey attrs)
+        item-group-data (parse-children :ItemGroupData content)]
+    (cond->
+      (assoc (data form-data)
+        ::form-data/form-oid (:FormOID attrs))
 
-(s/fdef parse-study-event-data
-  :args (s/cat :study-event-data (s/and ::element (tag= :StudyEventData)))
-  :ret :odm/study-event-data)
+      form-repeat-key
+      (assoc ::form-data/form-repeat-key form-repeat-key)
 
-(defn parse-study-event-data
+      (not (empty? item-group-data))
+      (assoc ::form-data/item-group-data item-group-data))))
+
+(defmethod parse* :StudyEventData
   [{:keys [attrs content] :as study-event-data}]
-  (check-tag :StudyEventData study-event-data)
-  (-> (data study-event-data)
-      (assoc ::study-event-data/study-event-oid (:StudyEventOID attrs))
-      (assoc-when ::study-event-data/study-event-repeat-key (:StudyEventRepeatKey attrs))
-      (assoc-when ::study-event-data/form-data (seq (map parse-form-data content)))))
+  (let [study-event-repeat-key (:StudyEventRepeatKey attrs)
+        form-data (parse-children :FormData content)]
+    (cond->
+      (assoc (data study-event-data)
+        ::study-event-data/study-event-oid (:StudyEventOID attrs))
 
-(s/fdef parse-subject-data
-  :args (s/cat :subject-data (s/and ::element (tag= :SubjectData)))
-  :ret :odm/subject-data)
+      study-event-repeat-key
+      (assoc ::study-event-data/study-event-repeat-key study-event-repeat-key)
 
-(defn parse-subject-data
+      (not (empty? form-data))
+      (assoc ::study-event-data/form-data form-data))))
+
+(defmethod parse* :SubjectData
   [{:keys [attrs content] :as subject-data}]
-  (check-tag :SubjectData subject-data)
-  (-> (data subject-data)
-      (assoc ::subject-data/subject-key (:SubjectKey attrs))
-      (assoc-when ::subject-data/study-event-data (seq (map parse-study-event-data content)))))
+  (let [study-event-data (parse-children :StudyEventData content)]
+    (cond->
+      (assoc (data subject-data)
+        ::subject-data/subject-key (:SubjectKey attrs))
 
-(s/fdef parse-clinical-data
-  :args (s/cat :clinical-data (s/and ::element (tag= :ClinicalData)))
-  :ret :odm/clinical-data)
+      (not (empty? study-event-data))
+      (assoc ::subject-data/study-event-data study-event-data))))
 
-(defn parse-clinical-data
+(defmethod parse* :ClinicalData
   [{:keys [attrs content] :as clinical-data}]
   (check-tag :ClinicalData clinical-data)
-  (-> {::clinical-data/study-oid (:StudyOID attrs)
-       ::clinical-data/metadata-version-oid (:MetaDataVersionOID attrs)}
-      (assoc-when ::clinical-data/subject-data (seq (map parse-subject-data content)))))
+  (let [subject-data (parse-children :SubjectData content)]
+    (cond->
+      #::clinical-data
+          {:study-oid (:StudyOID attrs)
+           :metadata-version-oid (:MetaDataVersionOID attrs)}
+
+      (not (empty? subject-data))
+      (assoc ::clinical-data/subject-data subject-data))))
 
 (defn- conform-file-type [x]
   (->> (conform-lc-kw x)
@@ -571,23 +576,16 @@
   (conformer conform-file-type unform-cap-str
              :gen #(gen/fmap unform-cap-str (s/gen :odm.file/type))))
 
-(s/fdef parse-file
-  :args (s/cat :file (s/and ::element (tag= :ODM)))
-  :ret :odm/file)
-
-(defn parse-file
-  "Parses a ODM file from its root element.
-
-  Throws an exception with :type ::validation-error and other keys like
-  :element :value and :error in ex-data."
+(defmethod parse* :ODM
   [{:keys [attrs content] :as file}]
   (check-tag :ODM file)
   (let [studies (parse-children :Study content)
-        clinical-data (parse-children :ClinicalData parse-clinical-data content)]
-    (cond-> #:odm.file
-        {:type (coerce :odm.xml/file-type file (:FileType attrs))
-         :oid (:FileOID attrs)
-         :creation-date-time (coerce :odm.xml/date-time file (:CreationDateTime attrs))}
+        clinical-data (parse-children :ClinicalData content)]
+    (cond->
+      #:odm.file
+          {:type (coerce :odm.xml/file-type file (:FileType attrs))
+           :oid (:FileOID attrs)
+           :creation-date-time (coerce :odm.xml/date-time file (:CreationDateTime attrs))}
 
       (not (empty? studies))
       (assoc ::file/studies studies)
@@ -601,7 +599,7 @@
   (def file
     (-> (io/input-stream "../../z/metadata/life-20170608-4.xml")
         (xml/parse)
-        (parse-file)))
+        (parse)))
 
   (->> (s/explain-data :odm/file file)
        :clojure.spec/problems
