@@ -1,9 +1,9 @@
 (ns lens-odm-parser.core
-  "The two main functions are parse and unparse-file.
+  "The two main functions are parse-elem and unparse-file.
 
   Example: `(-> (io/input-stream \"odm-file.xml\")
             (xml/parse)
-            (parse))`"
+            (parse-elem))`"
   (:require
     [camel-snake-kebab.core :refer [->kebab-case-keyword]]
     [clj-time.coerce :as tc]
@@ -64,14 +64,14 @@
 
 ;; ---- Parsing ---------------------------------------------------------------
 
-(defn- validation-ex [e value error]
+(defn- validation-ex [value error]
   (ex-info (format "Invalid value %s" value)
-           {:type ::validation-error :element e :value value :error error}))
+           {:type ::validation-error :value value :error error}))
 
-(defn- coerce [spec e s]
+(defn- coerce [spec s]
   (let [v (s/conform spec s)]
     (if (= ::s/invalid v)
-      (throw (validation-ex e s (s/explain-data spec s)))
+      (throw (validation-ex s (s/explain-data spec s)))
       v)))
 
 (defn string-value [e]
@@ -96,7 +96,7 @@
 (defn integer-value [e]
   (->> (string-value e)
        (str/trim)
-       (coerce :odm.xml/integer e)))
+       (coerce :odm.xml/integer)))
 
 (defn- parse-double-or-bigdec [s]
   (let [bigdec (bigdec s)
@@ -124,7 +124,7 @@
 (defn float-value [e]
   (->> (string-value e)
        (str/trim)
-       (coerce :odm.xml/float e)))
+       (coerce :odm.xml/float)))
 
 (defn- conform-date-time [x]
   (if (string? x)
@@ -152,7 +152,7 @@
 (defn date-time-value [e]
   (->> (string-value e)
        (str/trim)
-       (coerce :odm.xml/date-time e)))
+       (coerce :odm.xml/date-time)))
 
 (defn boolean-value [e]
   (-> (string-value e)
@@ -167,48 +167,75 @@
   (->> (conform-lc-kw x)
        (s/conform :odm/tx-type)))
 
-(defn- tag= [tag]
-  #(= tag (:tag %)))
+(defn- coerce-oid [s]
+  (coerce :odm.data-formats/oid s))
 
-(defn- check-tag [tag e]
-  (when-not (= tag (:tag e))
-    (throw
-      (ex-info
-        (format "Expected tag %s but got %s." (name tag) (name (:tag e)))
-        {:type ::validation-error :element e :expected-tag tag}))))
+(defn- coerce-integer [s]
+  (coerce :odm.xml/integer s))
 
-(defn- check-sub-tag [tag e]
-  (when-not (some (tag= tag) (:content e))
-    (throw
-      (ex-info
-        (format "Expected to find element with tag %s as child of element with tag %s."
-                (name tag) (name (:tag e)))
-        {:type ::validation-error :element e :expected-child-tag tag}))))
+(defn- coerce-float [s]
+  (coerce :odm.xml/float s))
 
-(defmulti parse*
-  "Parses XML Element. Dispatches by :tag."
+(defmulti parse-elem*
+  "Parses a single XML Element. Dispatches by :tag. Should return a map with a
+  single key-value pair which will be merged together with the maps from other
+  parses. Multiple values with the same key are merged with `into`."
   {:arglists '([element])}
   :tag)
 
-(s/fdef parse
+(s/fdef parse-elem
   :args (s/cat :element ::element))
 
-(defn parse [element]
-  (parse* element))
+(defn parse-elem [element]
+  (parse-elem* element))
 
-(defn- parse-children [tag content]
-  (into [] (comp (filter (tag= tag)) (map parse)) content))
+(defmethod parse-elem* :default [_])
 
-(defmethod parse* :GlobalVariables
-  [{:keys [content] :as global-variables}]
-  (check-sub-tag :StudyName global-variables)
-  (check-sub-tag :StudyDescription global-variables)
-  (check-sub-tag :ProtocolName global-variables)
-  (let [string-value #(string-value (first (filter (tag= %) content)))]
-    #:odm.study
-        {:name (string-value :StudyName)
-         :description (string-value :StudyDescription)
-         :protocol-name (string-value :ProtocolName)}))
+(defn parse-children
+  "Parses every child using `parse-elem` and merges the results. Keys occuring
+   more than once will be merged using `into`."
+  [content]
+  (apply (partial merge-with into) (map parse-elem content)))
+
+(defmulti parse-attr*
+  "Parses XML Attribute. Dispatches on a vector of element tag and attribute
+   name with a fallback on attribute name only. Should return a map with a
+   single key-value pair which will be merged together with the maps from other
+   parses."
+  {:arglists '([tag name value])}
+  (fn [tag name _] (if tag [tag name] name)))
+
+(defmethod parse-attr* :default [tag name value]
+  (when tag (parse-attr* nil name value)))
+
+(s/fdef parse-attr
+  :args (s/cat :tag keyword? :name keyword? :value string?))
+
+(defn parse-attr [tag key value]
+  (parse-attr* tag key value))
+
+(defmethod parse-attr* [:CodeListRef :CodeListOID]
+  [_ _ value]
+  {:odm.code-list-ref/code-list-oid (coerce-oid value)})
+
+(defn parse-attrs [tag attrs]
+  (into {} (map (fn [[name value]] (parse-attr tag name value)) attrs)))
+
+(defmethod parse-elem* :StudyName
+  [element]
+  {::study/name (string-value element)})
+
+(defmethod parse-elem* :StudyDescription
+  [element]
+  {::study/description (string-value element)})
+
+(defmethod parse-elem* :ProtocolName
+  [element]
+  {::study/protocol-name (string-value element)})
+
+(defmethod parse-elem* :GlobalVariables
+  [{:keys [content]}]
+  (parse-children content))
 
 (defn- conform-yes-no [x]
   (case x "Yes" true "No" false ::s/invalid))
@@ -217,95 +244,95 @@
   (s/conformer conform-yes-no #(if % "Yes" "No")))
 
 ;; TODO: language tag
-(defmethod parse* :TranslatedText
+(defmethod parse-elem* :TranslatedText
   [{:keys [attrs] :as translated-text}]
-  {:text (string-value translated-text)})
+  [{:text (string-value translated-text)}])
 
-(defmethod parse* :Description
+(defmethod parse-elem* :Description
   [{:keys [content]}]
-  (parse-children :TranslatedText content))
+  {:odm/description (parse-children content)})
 
-(defmethod parse* :Question
+(defmethod parse-elem* :Question
   [{:keys [content]}]
-  (parse-children :TranslatedText content))
+  {::item-def/question (parse-children content)})
 
-(defn- coerce-oid [e s]
-  (coerce :odm.data-formats/oid e s))
+(defmethod parse-elem* :CodeListRef
+  [{:keys [attrs]}]
+  {:odm/code-list-ref (parse-attrs :CodeListRef attrs)})
 
-(defn- coerce-integer [e s]
-  (coerce :odm.xml/integer e s))
+(defmethod parse-attr* [:Alias :Context]
+  [_ _ value]
+  {:odm.alias/context (coerce :odm.data-formats/text value)})
 
-(defn- coerce-float [e s]
-  (coerce :odm.xml/float e s))
+(defmethod parse-attr* [:Alias :Name]
+  [_ _ value]
+  {:odm.alias/name (coerce :odm.data-formats/text value)})
 
-(defmethod parse* :CodeListRef
-  [{:keys [attrs] :as code-list-ref}]
-  #:odm.code-list-ref
-      {:code-list-oid (coerce-oid code-list-ref (:CodeListOID attrs))})
+(defmethod parse-elem* :Alias
+  [{:keys [attrs]}]
+  {:odm/aliases [(parse-attrs :Alias attrs)]})
 
-(defmethod parse* :Alias
-  [{:keys [attrs] :as alias}]
-  #:odm.alias
-      {:context (coerce :odm.data-formats/text alias (:Context attrs))
-       :name (coerce :odm.data-formats/text alias (:Name attrs))})
+(defmethod parse-attr* [:ItemGroupRef :ItemGroupOID]
+  [_ _ value]
+  {::item-group-ref/item-group-oid (coerce-oid value)})
 
-(defmethod parse* :ItemGroupRef
-  [{:keys [attrs content] :as item-group-ref}]
-  (cond-> #::item-group-ref
-      {:item-group-oid (coerce-oid item-group-ref (:ItemGroupOID attrs))
-       :odm/mandatory (coerce :odm.xml/yes-no item-group-ref (:Mandatory attrs))}
+(defmethod parse-attr* :Mandatory
+  [_ _ value]
+  {:odm/mandatory (coerce :odm.xml/yes-no value)})
 
-    (:OrderNumber attrs)
-    (assoc :odm/order-number (coerce-integer item-group-ref (:OrderNumber attrs)))
+(defmethod parse-attr* :OrderNumber
+  [_ _ value]
+  {:odm/order-number (coerce-integer value)})
 
-    (:CollectionExceptionConditionOID attrs)
-    (assoc :odm.ref/collection-exception-condition-oid
-           (coerce-oid item-group-ref (:CollectionExceptionConditionOID attrs)))))
+(defmethod parse-attr* :CollectionExceptionConditionOID
+  [_ _ value]
+  (coerce-oid value))
 
-(defmethod parse* :ItemRef
-  [{:keys [attrs content] :as item-ref}]
-  (cond-> #::item-ref
-      {:item-oid (coerce-oid item-ref (:ItemOID attrs))
-       :odm/mandatory (coerce :odm.xml/yes-no item-ref (:Mandatory attrs))}
+(defmethod parse-elem* :ItemGroupRef
+  [{:keys [attrs]}]
+  {::form-def/item-group-refs
+   [(parse-attrs :ItemGroupRef attrs)]})
 
-    (:OrderNumber attrs)
-    (assoc :odm/order-number (coerce-integer item-ref (:OrderNumber attrs)))
+(defmethod parse-attr* [:ItemRef :ItemOID]
+  [_ _ value]
+  {::item-ref/item-oid (coerce-oid value)})
 
-    (:CollectionExceptionConditionOID attrs)
-    (assoc :odm.ref/collection-exception-condition-oid
-           (coerce-oid item-ref (:CollectionExceptionConditionOID attrs)))))
+(defmethod parse-elem* :ItemRef
+  [{:keys [attrs]}]
+  {::item-group-def/item-refs
+   [(parse-attrs :ItemRef attrs)]})
 
-(defmethod parse* :FormDef
-  [{:keys [attrs content] :as form-def}]
-  (let [parse-children #(parse-children %1 content)
-        description (first (parse-children :Description))
-        item-group-refs (parse-children :ItemGroupRef)]
-    (cond-> #::form-def
-        {:oid (coerce-oid form-def (:OID attrs))
-         :name (coerce :odm.data-formats/name form-def (:Name attrs))
-         :odm.def/repeating (coerce :odm.xml/yes-no form-def (:Repeating attrs))}
+(defmethod parse-attr* [:FormDef :OID]
+  [_ _ value]
+  {::form-def/oid (coerce-oid value)})
 
-      description
-      (assoc :odm/description description)
+(defmethod parse-attr* [:FormDef :Name]
+  [_ _ value]
+  {::form-def/name (coerce :odm.data-formats/name value)})
 
-      (not (empty? item-group-refs))
-      (assoc ::form-def/item-group-refs item-group-refs))))
+(defmethod parse-attr* :Repeating
+  [_ _ value]
+  {:odm.def/repeating (coerce :odm.xml/yes-no value)})
 
-(defmethod parse* :ItemGroupDef
-  [{:keys [attrs content] :as item-group-def}]
-  (let [parse-children #(parse-children %1 content)
-        description (first (parse-children :Description))
-        item-refs (parse-children :ItemRef)]
-    (cond-> #::item-group-def
-        {:oid (coerce-oid item-group-def (:OID attrs))
-         :name (coerce :odm.data-formats/name item-group-def (:Name attrs))
-         :odm.def/repeating (coerce :odm.xml/yes-no item-group-def (:Repeating attrs))}
+(defmethod parse-elem* :FormDef
+  [{:keys [attrs content]}]
+  {::metadata-version/form-defs
+   [(merge (parse-children content)
+           (parse-attrs :FormDef attrs))]})
 
-      description
-      (assoc :odm/description description)
+(defmethod parse-attr* [:ItemGroupDef :OID]
+  [_ _ value]
+  {::item-group-def/oid (coerce-oid value)})
 
-      (not (empty? item-refs))
-      (assoc ::item-group-def/item-refs item-refs))))
+(defmethod parse-attr* [:ItemGroupDef :Name]
+  [_ _ value]
+  {::item-group-def/name (coerce :odm.data-formats/name value)})
+
+(defmethod parse-elem* :ItemGroupDef
+  [{:keys [attrs content]}]
+  {::metadata-version/item-group-defs
+   [(merge (parse-children content)
+           (parse-attrs :ItemGroupDef attrs))]})
 
 (defn- conform-data-type [x]
   (case x
@@ -333,53 +360,45 @@
 (s/def :odm.xml/data-type
   (s/conformer conform-data-type name))
 
-(defmethod parse* :ItemDef
-  [{:keys [attrs content] :as item-def}]
-  (let [parse-children #(parse-children %1 content)
-        description (first (parse-children :Description))
-        question (first (parse-children :Question))
-        code-list-ref (first (parse-children :CodeListRef))
-        aliases (parse-children :Alias)]
-    (cond-> #::item-def
-        {:oid (coerce-oid item-def (:OID attrs))
-         :name (coerce :odm.data-formats/name item-def (:Name attrs))
-         :data-type (coerce :odm.xml/data-type item-def (:DataType attrs))}
+(defmethod parse-attr* [:ItemDef :OID]
+  [_ _ value]
+  {::item-def/oid (coerce-oid value)})
 
-      (:Length attrs)
-      (assoc ::item-def/length (coerce-integer item-def (:Length attrs)))
+(defmethod parse-attr* [:ItemDef :Name]
+  [_ _ value]
+  {::item-def/name (coerce :odm.data-formats/name value)})
 
-      description
-      (assoc :odm/description description)
+(defmethod parse-attr* [:ItemDef :DataType]
+  [_ _ value]
+  {::item-def/data-type (coerce :odm.xml/data-type value)})
 
-      question
-      (assoc ::item-def/question question)
+(defmethod parse-attr* [:ItemDef :Length]
+  [_ _ value]
+  {::item-def/length (coerce-integer value)})
 
-      code-list-ref
-      (assoc :odm/code-list-ref code-list-ref)
+(defmethod parse-elem* :ItemDef
+  [{:keys [attrs content]}]
+  {::metadata-version/item-defs
+   [(merge (parse-children content)
+           (parse-attrs :ItemDef attrs))]})
 
-      (not (empty? aliases))
-      (assoc :odm/aliases aliases))))
-
-(defmethod parse* :Decode
+(defmethod parse-elem* :Decode
   [{:keys [content]}]
-  (parse-children :TranslatedText content))
+  {::code-list-item/decode (parse-children content)})
 
-(defmethod parse* :CodeListItem
-  [{:keys [attrs content] :as code-list-item}]
-  (let [parse-children #(parse-children %1 content)
-        aliases (parse-children :Alias)]
-    (cond-> #::code-list-item
-        {:coded-value (coerce-oid code-list-item (:CodedValue attrs))
-         :decode (first (parse-children :Decode))}
+(defmethod parse-attr* [:CodeListItem :CodedValue]
+  [_ _ value]
+  {::code-list-item/coded-value (coerce-oid value)})
 
-      (:Rank attrs)
-      (assoc ::code-list-item/rank (coerce-float code-list-item (:Rank attrs)))
+(defmethod parse-attr* [:CodeListItem :Rank]
+  [_ _ value]
+  {::code-list-item/rank (coerce-float value)})
 
-      (:OrderNumber attrs)
-      (assoc :odm/order-number (coerce-integer code-list-item (:OrderNumber attrs)))
-
-      (not (empty? aliases))
-      (assoc :odm/aliases aliases))))
+(defmethod parse-elem* :CodeListItem
+  [{:keys [attrs content]}]
+  {::code-list/code-list-items
+   [(merge (parse-children content)
+           (parse-attrs :CodeListItem attrs))]})
 
 (defn- conform-code-list-data-type [x]
   (if (#{"integer" "float" "text" "string"} x)
@@ -389,184 +408,171 @@
 (s/def :odm.xml.code-list/data-type
   (s/conformer conform-code-list-data-type name))
 
-(defmethod parse* :CodeList
-  [{:keys [attrs content] :as code-list}]
-  (let [parse-children #(parse-children %1 content)
-        description (first (parse-children :Description))
-        code-list-items (parse-children :CodeListItem)
-        aliases (parse-children :Alias)]
-    (cond-> #::code-list
-        {:oid (coerce-oid code-list (:OID attrs))
-         :name (coerce :odm.data-formats/name code-list (:Name attrs))
-         :data-type (coerce :odm.xml.code-list/data-type code-list (:DataType attrs))}
+(defmethod parse-attr* [:CodeList :OID]
+  [_ _ value]
+  {::code-list/oid (coerce-oid value)})
 
-      description
-      (assoc :odm/description description)
+(defmethod parse-attr* [:CodeList :Name]
+  [_ _ value]
+  {::code-list/name (coerce :odm.data-formats/name value)})
 
-      (not (empty? code-list-items))
-      (assoc ::code-list/code-list-items code-list-items)
+(defmethod parse-attr* [:CodeList :DataType]
+  [_ _ value]
+  {::code-list/data-type (coerce :odm.xml.code-list/data-type value)})
 
-      (not (empty? aliases))
-      (assoc :odm/aliases aliases))))
+(defmethod parse-elem* :CodeList
+  [{:keys [attrs content]}]
+  {::metadata-version/code-lists
+   [(merge (parse-children content)
+           (parse-attrs :CodeList attrs))]})
 
-(defmethod parse* :MetaDataVersion
-  [{:keys [attrs content] :as metadata-version}]
-  (let [parse-children #(parse-children %1 content)
-        form-defs (parse-children :FormDef)
-        item-group-defs (parse-children :ItemGroupDef)
-        item-defs (parse-children :ItemDef)
-        code-lists (parse-children :CodeList)]
-    (cond-> #::metadata-version
-        {:oid (coerce-oid metadata-version (:OID attrs))
-         :name (coerce :odm.data-formats/name metadata-version (:Name attrs))}
+(defmethod parse-attr* [:MetaDataVersion :OID]
+  [_ _ value]
+  {::metadata-version/oid (coerce-oid value)})
 
-      (:Description attrs)
-      (assoc ::metadata-version/description (:Description attrs))
+(defmethod parse-attr* [:MetaDataVersion :Name]
+  [_ _ value]
+  {::metadata-version/name (coerce :odm.data-formats/name value)})
 
-      (not (empty? form-defs))
-      (assoc ::metadata-version/form-defs form-defs)
+(defmethod parse-attr* [:MetaDataVersion :Description]
+  [_ _ value]
+  {::metadata-version/description value})
 
-      (not (empty? item-group-defs))
-      (assoc ::metadata-version/item-group-defs item-group-defs)
+(defmethod parse-elem* :MetaDataVersion
+  [{:keys [attrs content]}]
+  {:odm.study/metadata-versions
+   [(merge (parse-children content)
+           (parse-attrs :MetaDataVersion attrs))]})
 
-      (not (empty? item-defs))
-      (assoc ::metadata-version/item-defs item-defs)
+(defmethod parse-attr* [:Study :OID]
+  [_ _ value]
+  {::study/oid (coerce-oid value)})
 
-      (not (empty? code-lists))
-      (assoc ::metadata-version/code-lists code-lists))))
+(defmethod parse-elem* :Study
+  [{:keys [attrs content]}]
+  {::file/studies
+   [(merge (parse-children content)
+           (parse-attrs :Study attrs))]})
 
-(defmethod parse* :Study
-  [{:keys [attrs content] :as study}]
-  (check-sub-tag :GlobalVariables study)
-  (let [parse-children #(parse-children %1 content)
-        global-variables (first (parse-children :GlobalVariables))
-        metadata-versions (parse-children :MetaDataVersion)]
-    (cond-> (merge {::study/oid (:OID attrs)} global-variables)
+(defn- assoc-when [m k v]
+  (if v (assoc m k v) m))
 
-      (not (empty? metadata-versions))
-      (assoc :odm.study/metadata-versions metadata-versions))))
+(defmethod parse-attr* [:ItemData :ItemOID]
+  [_ _ value]
+  {::item-data/item-oid value})
+
+(defmethod parse-attr* [:ItemData :MeasurementUnitOID]
+  [_ _ value]
+  {::item-data/measurement-unit-oid value})
 
 (s/def :odm.xml/tx-type
   (conformer conform-tx-type unform-cap-str
              :gen #(gen/fmap unform-cap-str (s/gen :odm/tx-type))))
 
-(defn tx-type [e]
-  (some->> (-> e :attrs :TransactionType)
-           (coerce :odm.xml/tx-type e)))
+(defmethod parse-attr* :TransactionType
+  [_ _ value]
+  {:odm/tx-type (coerce :odm.xml/tx-type value)})
 
-(defn- data [e]
-  (if-let [tx-type (tx-type e)]
-    {:odm/tx-type tx-type}
-    {}))
-
-(defn- assoc-when [m k v]
-  (if v (assoc m k v) m))
-
-(defn- data-item
-  [{:keys [attrs] :as item-data} data-type]
-  (assoc (data item-data)
-    ::item-data/item-oid (:ItemOID attrs)
-    ::item-data/data-type data-type))
-
-(defmethod parse* :ItemDataString
-  [item-data]
-  (assoc (data-item item-data :string)
-    ::item-data/string-value (string-value item-data)))
-
-(defmethod parse* :ItemDataInteger
+(defmethod parse-elem* :ItemDataString
   [{:keys [attrs] :as item-data}]
-  (let [measurement-unit (:MeasurementUnitOID attrs)]
-    (cond->
-      (assoc (data-item item-data :integer)
-        ::item-data/integer-value (integer-value item-data))
+  {::item-group-data/item-data
+   [(assoc (parse-attrs :ItemData attrs)
+      ::item-data/data-type :string
+      ::item-data/string-value (string-value item-data))]})
 
-      measurement-unit
-      (assoc ::item-data/measurement-unit-oid measurement-unit))))
-
-(defmethod parse* :ItemDataFloat
+(defmethod parse-elem* :ItemDataInteger
   [{:keys [attrs] :as item-data}]
-  (let [measurement-unit (:MeasurementUnitOID attrs)]
-    (cond->
-      (assoc (data-item item-data :float)
-        ::item-data/float-value (float-value item-data))
+  {::item-group-data/item-data
+   [(assoc (parse-attrs :ItemData attrs)
+      ::item-data/data-type :integer
+      ::item-data/integer-value (integer-value item-data))]})
 
-      measurement-unit
-      (assoc ::item-data/measurement-unit-oid measurement-unit))))
+(defmethod parse-elem* :ItemDataFloat
+  [{:keys [attrs] :as item-data}]
+  {::item-group-data/item-data
+   [(assoc (parse-attrs :ItemData attrs)
+      ::item-data/data-type :float
+      ::item-data/float-value (float-value item-data))]})
 
-(defmethod parse* :ItemDataDatetime
-  [item-data]
-  (assoc (data-item item-data :date-time)
-    ::item-data/date-time-value (date-time-value item-data)))
+(defmethod parse-elem* :ItemDataDatetime
+  [{:keys [attrs] :as item-data}]
+  {::item-group-data/item-data
+   [(assoc (parse-attrs :ItemData attrs)
+      ::item-data/data-type :date-time
+      ::item-data/date-time-value (date-time-value item-data))]})
 
-(defmethod parse* :ItemDataBoolean
-  [item-data]
-  (assoc (data-item item-data :boolean)
-    ::item-data/boolean-value (boolean-value item-data)))
+(defmethod parse-elem* :ItemDataBoolean
+  [{:keys [attrs] :as item-data}]
+  {::item-group-data/item-data
+   [(assoc (parse-attrs :ItemData attrs)
+      ::item-data/data-type :boolean
+      ::item-data/boolean-value (boolean-value item-data))]})
 
-(defmethod parse* :ItemGroupData
-  [{:keys [attrs content] :as item-group-data}]
-  (let [item-group-repeat-key (:ItemGroupRepeatKey attrs)
-        item-data (map parse content)]
-    (cond->
-      (assoc (data item-group-data)
-        ::item-group-data/item-group-oid (:ItemGroupOID attrs))
+(defmethod parse-attr* [:ItemGroupData :ItemGroupOID]
+  [_ _ value]
+  {::item-group-data/item-group-oid value})
 
-      item-group-repeat-key
-      (assoc ::item-group-data/item-group-repeat-key item-group-repeat-key)
+(defmethod parse-attr* [:ItemGroupData :ItemGroupRepeatKey]
+  [_ _ value]
+  {::item-group-data/item-group-repeat-key value})
 
-      (not (empty? item-data))
-      (assoc ::item-group-data/item-data item-data))))
+(defmethod parse-elem* :ItemGroupData
+  [{:keys [attrs content]}]
+  {::form-data/item-group-data
+   [(merge (parse-children content)
+           (parse-attrs :ItemGroupData attrs))]})
 
-(defmethod parse* :FormData
-  [{:keys [attrs content] :as form-data}]
-  (check-tag :FormData form-data)
-  (let [form-repeat-key (:FormRepeatKey attrs)
-        item-group-data (parse-children :ItemGroupData content)]
-    (cond->
-      (assoc (data form-data)
-        ::form-data/form-oid (:FormOID attrs))
+(defmethod parse-attr* [:FormData :FormOID]
+  [_ _ value]
+  {::form-data/form-oid value})
 
-      form-repeat-key
-      (assoc ::form-data/form-repeat-key form-repeat-key)
+(defmethod parse-attr* [:FormData :FormRepeatKey]
+  [_ _ value]
+  {::form-data/form-repeat-key value})
 
-      (not (empty? item-group-data))
-      (assoc ::form-data/item-group-data item-group-data))))
+(defmethod parse-elem* :FormData
+  [{:keys [attrs content]}]
+  {::study-event-data/form-data
+   [(merge (parse-children content)
+           (parse-attrs :FormData attrs))]})
 
-(defmethod parse* :StudyEventData
-  [{:keys [attrs content] :as study-event-data}]
-  (let [study-event-repeat-key (:StudyEventRepeatKey attrs)
-        form-data (parse-children :FormData content)]
-    (cond->
-      (assoc (data study-event-data)
-        ::study-event-data/study-event-oid (:StudyEventOID attrs))
+(defmethod parse-attr* [:StudyEventData :StudyEventOID]
+  [_ _ value]
+  {::study-event-data/study-event-oid value})
 
-      study-event-repeat-key
-      (assoc ::study-event-data/study-event-repeat-key study-event-repeat-key)
+(defmethod parse-attr* [:StudyEventData :StudyEventRepeatKey]
+  [_ _ value]
+  {::study-event-data/study-event-repeat-key value})
 
-      (not (empty? form-data))
-      (assoc ::study-event-data/form-data form-data))))
+(defmethod parse-elem* :StudyEventData
+  [{:keys [attrs content]}]
+  {::subject-data/study-event-data
+   [(merge (parse-children content)
+           (parse-attrs :StudyEventData attrs))]})
 
-(defmethod parse* :SubjectData
-  [{:keys [attrs content] :as subject-data}]
-  (let [study-event-data (parse-children :StudyEventData content)]
-    (cond->
-      (assoc (data subject-data)
-        ::subject-data/subject-key (:SubjectKey attrs))
+(defmethod parse-attr* [:SubjectData :SubjectKey]
+  [_ _ value]
+  {::subject-data/subject-key value})
 
-      (not (empty? study-event-data))
-      (assoc ::subject-data/study-event-data study-event-data))))
+(defmethod parse-elem* :SubjectData
+  [{:keys [attrs content]}]
+  {::clinical-data/subject-data
+   [(merge (parse-children content)
+           (parse-attrs :SubjectData attrs))]})
 
-(defmethod parse* :ClinicalData
-  [{:keys [attrs content] :as clinical-data}]
-  (check-tag :ClinicalData clinical-data)
-  (let [subject-data (parse-children :SubjectData content)]
-    (cond->
-      #::clinical-data
-          {:study-oid (:StudyOID attrs)
-           :metadata-version-oid (:MetaDataVersionOID attrs)}
+(defmethod parse-attr* [:ClinicalData :StudyOID]
+  [_ _ value]
+  {::clinical-data/study-oid value})
 
-      (not (empty? subject-data))
-      (assoc ::clinical-data/subject-data subject-data))))
+(defmethod parse-attr* [:ClinicalData :MetaDataVersionOID]
+  [_ _ value]
+  {::clinical-data/metadata-version-oid value})
+
+(defmethod parse-elem* :ClinicalData
+  [{:keys [attrs content]}]
+  {::file/clinical-data
+   [(merge (parse-children content)
+           (parse-attrs :ClinicalData attrs))]})
 
 (defn- conform-file-type [x]
   (->> (conform-lc-kw x)
@@ -576,22 +582,22 @@
   (conformer conform-file-type unform-cap-str
              :gen #(gen/fmap unform-cap-str (s/gen :odm.file/type))))
 
-(defmethod parse* :ODM
-  [{:keys [attrs content] :as file}]
-  (check-tag :ODM file)
-  (let [studies (parse-children :Study content)
-        clinical-data (parse-children :ClinicalData content)]
-    (cond->
-      #:odm.file
-          {:type (coerce :odm.xml/file-type file (:FileType attrs))
-           :oid (:FileOID attrs)
-           :creation-date-time (coerce :odm.xml/date-time file (:CreationDateTime attrs))}
+(defmethod parse-attr* [:ODM :FileType]
+  [_ _ value]
+  {:odm.file/type (coerce :odm.xml/file-type value)})
 
-      (not (empty? studies))
-      (assoc ::file/studies studies)
+(defmethod parse-attr* [:ODM :FileOID]
+  [_ _ value]
+  {:odm.file/oid value})
 
-      (not (empty? clinical-data))
-      (assoc ::file/clinical-data clinical-data))))
+(defmethod parse-attr* [:ODM :CreationDateTime]
+  [_ _ value]
+  {:odm.file/creation-date-time (coerce :odm.xml/date-time value)})
+
+(defmethod parse-elem* :ODM
+  [{:keys [attrs content]}]
+  (merge (parse-children content)
+         (parse-attrs :ODM attrs)))
 
 (comment
   (require '[clojure.data.xml :as xml])
@@ -599,7 +605,7 @@
   (def file
     (-> (io/input-stream "../../z/metadata/life-20170608-4.xml")
         (xml/parse)
-        (parse)))
+        (parse-elem)))
 
   (->> (s/explain-data :odm/file file)
        :clojure.spec/problems
