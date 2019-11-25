@@ -93,10 +93,13 @@
 (s/def :odm.xml/integer
   (s/conformer conform-int))
 
+(defn coerce-integer [s]
+  (coerce :odm.xml/integer s))
+
 (defn integer-value [e]
   (->> (string-value e)
        (str/trim)
-       (coerce :odm.xml/integer)))
+       (coerce-integer)))
 
 (defn- parse-double-or-bigdec [s]
   (let [bigdec (bigdec s)
@@ -121,10 +124,13 @@
 (s/def :odm.xml/float
   (s/conformer conform-float))
 
+(defn coerce-float [s]
+  (coerce :odm.xml/float s))
+
 (defn float-value [e]
   (->> (string-value e)
        (str/trim)
-       (coerce :odm.xml/float)))
+       (coerce-float)))
 
 (defn- conform-date-time [x]
   (if (string? x)
@@ -149,10 +155,13 @@
 (s/def :odm.xml/date-time
   (conformer conform-date-time unform-date-time :gen xml-date-time-gen))
 
+(defn coerce-date-time [value]
+  (coerce :odm.xml/date-time value))
+
 (defn date-time-value [e]
   (->> (string-value e)
        (str/trim)
-       (coerce :odm.xml/date-time)))
+       (coerce-date-time)))
 
 (defn boolean-value [e]
   (-> (string-value e)
@@ -167,14 +176,8 @@
   (->> (conform-lc-kw x)
        (s/conform :odm/tx-type)))
 
-(defn- coerce-oid [s]
+(defn coerce-oid [s]
   (coerce :odm.data-formats/oid s))
-
-(defn- coerce-integer [s]
-  (coerce :odm.xml/integer s))
-
-(defn- coerce-float [s]
-  (coerce :odm.xml/float s))
 
 (defmulti parse-elem*
   "Parses a single XML Element. Dispatches by :tag. Should return a map with a
@@ -592,7 +595,7 @@
 
 (defmethod parse-attr* [:ODM :CreationDateTime]
   [_ _ value]
-  {:odm.file/creation-date-time (coerce :odm.xml/date-time value)})
+  {:odm.file/creation-date-time (coerce-date-time value)})
 
 (defmethod parse-elem* :ODM
   [{:keys [attrs content]}]
