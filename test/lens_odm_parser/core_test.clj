@@ -94,7 +94,9 @@
 
 (deftest xml-date-time-test
   (are [x c] (= c (s/conform :odm.xml/date-time x))
-    "1969-12-31T23:59:59.999Z" #inst "1969-12-31T23:59:59.999Z")
+    "1969-12-31T23:59:59.999Z" #inst "1969-12-31T23:59:59.999Z"
+    "1969-12-31T23:59:59Z" #inst "1969-12-31T23:59:59.000Z"
+    "1969-12-31T23:59:59" #inst "1969-12-31T23:59:59.000-00:00")
   (given-problems :odm.xml/date-time nil
     [0 :pred] := 'conform-date-time
     [0 :via] := [:odm.xml/date-time])

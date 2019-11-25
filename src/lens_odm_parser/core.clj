@@ -140,7 +140,10 @@
         (try
           (tc/to-date (tf/parse (tf/formatters :date-time-no-ms) x))
           (catch Exception _
-            ::s/invalid))))
+            (try
+              (tc/to-date (tf/parse (tf/formatters :local-date-opt-time) x))
+              (catch Exception _
+                ::s/invalid))))))
     ::s/invalid))
 
 (defn- unform-date-time [t]
